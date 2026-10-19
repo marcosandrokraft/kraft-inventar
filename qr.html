@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>QR-Codes</title>
+<link rel="stylesheet" href="style.css" />
+<link rel="icon" href="icon.svg" />
+<style>
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-top: 1rem; }
+  .qr-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 1rem; text-align: center; }
+  .qr-card img { width: 100%; max-width: 220px; height: auto; }
+  .qr-card .label { margin-top: 0.4rem; font-weight: 600; }
+  @media print {
+    header, form, .muted { display: none !important; }
+    .grid { gap: 0.8rem; }
+  }
+</style>
+</head>
+<body>
+<header class="app-header">
+  <a href="index.html">🏠 Übersicht</a>
+</header>
+<main>
+  <h1>QR-Codes zum Drucken</h1>
+  <p class="muted">Ein Behälter pro Zeile (Anzeigename). Der Link wird automatisch aus dem Namen erzeugt. Danach ausdrucken, ausschneiden und auf den Behälter kleben.</p>
+  <form class="add-form" id="gen-form" style="flex-direction:column; align-items:stretch;">
+    <textarea name="names" rows="5" placeholder="Kühlschrank&#10;Gefrierfach&#10;Vorratsschrank&#10;Kleiderschrank Marco" style="width:100%; padding:0.6rem; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text);"></textarea>
+    <button type="submit" style="align-self:flex-start;">QR-Codes erzeugen</button>
+  </form>
+  <div class="grid" id="grid"></div>
+</main>
+<script type="module">
+  function slugify(text) {
+    return text.toString().toLowerCase().trim()
+      .replace(/[^a-z0-9äöüß]+/g, "-")
+      .replace(/(^-|-$)/g, "");
+  }
+
+  const baseUrl = new URL("index.html", location.href);
+  const grid = document.getElementById("grid");
+
+  document.getElementById("gen-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const names = e.target.names.value.split("\n").map(s => s.trim()).filter(Boolean);
+    grid.innerHTML = "";
+    names.forEach((name) => {
+      const id = slugify(name);
+      const url = `${baseUrl.href}?c=${encodeURIComponent(id)}`;
+      const qrImg = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(url)}`;
+      const card = document.createElement("div");
+      card.className = "qr-card";
+      card.innerHTML = `
+        <img src="${qrImg}" alt="QR-Code ${name}" />
+        <div class="label">${name}</div>
+        <div class="muted" style="word-break:break-all;">${url}</div>
+      `;
+      grid.appendChild(card);
+    });
+  });
+</script>
+</body>
+</html>
