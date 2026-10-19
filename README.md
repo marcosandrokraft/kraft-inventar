@@ -20,18 +20,10 @@ Kosten: 0.- (GitHub Pages Hosting + Firebase Spark-Plan, beides kostenlos im nor
 
 ## 2. Firestore-Regeln setzen
 
-Im Firebase-Konsolen-Menü **Firestore Database → Regeln** einfügen und veröffentlichen:
-
-```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if true;
-    }
-  }
-}
-```
+Im Firebase-Konsolen-Menü **Firestore Database → Regeln** den kompletten Inhalt von
+[firestore.rules](firestore.rules) einfügen und veröffentlichen. Die Regeln erlauben nur Behälter und
+Artikel in der erwarteten Form (Namenslänge, Menge, Einheit, Fotogrösse), damit niemand das
+Gratis-Kontingent mit beliebigen Daten füllen kann.
 
 **Wichtig:** Das bedeutet, jeder mit der App-URL kann lesen/schreiben (wie gewünscht, kein Login).
 Die URL/QR-Codes also nicht öffentlich posten, nur an die Familie weitergeben. Das reicht für

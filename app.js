@@ -1,4 +1,4 @@
-import { firebaseConfig } from "./firebase-config.js";
+import * as config from "./firebase-config.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import {
   getFirestore,
@@ -11,16 +11,27 @@ import {
   query,
   orderBy,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import removeBackground from "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/index.mjs";
+
+// Freistellungs-Bibliothek wird erst beim ersten Foto geladen. Als statischer Import würde ein
+// Ladefehler (CDN nicht erreichbar, alter Browser) die ganze App bei "Lade…" stehen lassen.
+const BACKGROUND_REMOVAL_URL = "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/index.mjs";
 
 // Einheitlicher Hintergrund für freigestellte Fotos.
 const PHOTO_BACKGROUND = "#e8e8e8";
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+const app = initializeApp(config.firebaseConfig);
+// Falls beim Anlegen der Firestore-Datenbank eine eigene "Database ID" vergeben wurde,
+// in firebase-config.js `export const firestoreDatabaseId = "..."` eintragen.
+const db = getFirestore(app, config.firestoreDatabaseId || "(default)");
 
 const main = document.getElementById("app");
 const toastEl = document.getElementById("toast");
+
+// Zeigt einen Firestore-Fehler sichtbar an statt endlos "Lade…".
+function showError(el, err) {
+  console.error(err);
+  el.innerHTML = `<p class="empty-hint">Fehler: <strong>${escapeHtml(err.code || "unbekannt")}</strong><br><small>${escapeHtml(err.message || String(err))}</small></p>`;
+}
 
 function toast(msg) {
   toastEl.textContent = msg;
@@ -99,6 +110,7 @@ async function compressImage(file) {
 // legt es auf einen einheitlichen Hintergrund. Das Modell (~ein paar MB) wird beim ersten
 // Aufruf pro Gerät heruntergeladen und danach vom Browser zwischengespeichert.
 async function cutoutWithBackground(file) {
+  const { default: removeBackground } = await import(BACKGROUND_REMOVAL_URL);
   const cutoutBlob = await removeBackground(file, {
     model: "isnet_quint8",
     output: { type: "foreground", format: "image/png" },
@@ -149,7 +161,8 @@ photoInput.addEventListener("change", async () => {
     );
     toast("Foto gespeichert");
   } catch (err) {
-    toast("Foto konnte nicht gespeichert werden");
+    console.error(err);
+    toast(`Foto konnte nicht gespeichert werden (${err.code || err.message})`);
   }
 });
 
@@ -192,16 +205,20 @@ function renderOverview() {
       a.innerHTML = `<div class="name"><strong>${escapeHtml(data.name || d.id)}</strong><small>${escapeHtml(d.id)}</small></div><div>›</div>`;
       list.appendChild(a);
     });
-  });
+  }, (err) => showError(list, err));
 
   document.getElementById("new-container-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const name = e.target.name.value.trim();
     if (!name) return;
     const id = slugify(name);
-    await setDoc(doc(db, "containers", id), { name, createdAt: serverTimestamp() }, { merge: true });
-    e.target.reset();
-    toast(`"${name}" angelegt`);
+    try {
+      await setDoc(doc(db, "containers", id), { name, createdAt: serverTimestamp() }, { merge: true });
+      e.target.reset();
+      toast(`"${name}" angelegt`);
+    } catch (err) {
+      showError(list, err);
+    }
   });
 }
 
@@ -226,9 +243,10 @@ function renderContainer(id) {
     const title = document.getElementById("container-title");
     title.textContent = snap.exists() ? (snap.data().name || id) : `Neuer Behälter: ${id}`;
     if (!snap.exists()) {
-      setDoc(doc(db, "containers", id), { name: id, createdAt: serverTimestamp() }, { merge: true });
+      setDoc(doc(db, "containers", id), { name: id, createdAt: serverTimestamp() }, { merge: true })
+        .catch((err) => showError(itemsEl, err));
     }
-  });
+  }, (err) => showError(itemsEl, err));
 
   const itemsEl = document.getElementById("items");
   const itemsQuery = query(collection(db, "containers", id, "items"), orderBy("name"));
@@ -260,7 +278,7 @@ function renderContainer(id) {
       card.querySelector('[data-action="del"]').addEventListener("click", () => removeItem(id, d.id, item.name));
       itemsEl.appendChild(card);
     });
-  });
+  }, (err) => showError(itemsEl, err));
 
   document.getElementById("add-item-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -269,14 +287,19 @@ function renderContainer(id) {
     const unit = e.target.unit.value;
     if (!name) return;
     const itemId = slugify(name);
-    await setDoc(
-      doc(db, "containers", id, "items", itemId),
-      { name, qty, unit, updatedAt: serverTimestamp() },
-      { merge: true }
-    );
-    e.target.reset();
-    e.target.qty.value = 1;
-    toast(`"${name}" hinzugefügt`);
+    try {
+      await setDoc(
+        doc(db, "containers", id, "items", itemId),
+        { name, qty, unit, updatedAt: serverTimestamp() },
+        { merge: true }
+      );
+      e.target.reset();
+      e.target.qty.value = 1;
+      toast(`"${name}" hinzugefügt`);
+    } catch (err) {
+      console.error(err);
+      toast(`Speichern fehlgeschlagen (${err.code || err.message})`);
+    }
   });
 }
 

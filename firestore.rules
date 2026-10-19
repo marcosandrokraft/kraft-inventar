@@ -1,0 +1,37 @@
+rules_version = '2';
+// Kein Login: jeder mit der URL darf lesen/schreiben, aber nur Daten in der erwarteten Form.
+// Verhindert, dass jemand beliebige Sammlungen/grosse Dokumente anlegt und das Gratis-Kontingent aufbraucht.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function validName(d) {
+      return d.name is string && d.name.size() > 0 && d.name.size() <= 100;
+    }
+
+    function validContainer(d) {
+      return d.keys().hasOnly(['name', 'createdAt'])
+        && validName(d)
+        && (!('createdAt' in d) || d.createdAt is timestamp);
+    }
+
+    function validItem(d) {
+      return d.keys().hasOnly(['name', 'qty', 'unit', 'photo', 'updatedAt'])
+        && validName(d)
+        && d.qty is int && d.qty >= 1 && d.qty <= 100000
+        && d.unit in ['Stk', 'Packung', 'g', 'ml']
+        && (!('photo' in d) || (d.photo is string && d.photo.size() <= 900000))
+        && (!('updatedAt' in d) || d.updatedAt is timestamp);
+    }
+
+    match /containers/{containerId} {
+      allow read: if true;
+      allow create, update: if containerId.size() <= 100 && validContainer(request.resource.data);
+      allow delete: if false;
+
+      match /items/{itemId} {
+        allow read, delete: if true;
+        allow create, update: if itemId.size() <= 100 && validItem(request.resource.data);
+      }
+    }
+  }
+}
