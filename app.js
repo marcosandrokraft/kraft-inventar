@@ -22,7 +22,9 @@ import {
 
 // Freistellungs-Bibliothek wird erst beim ersten Foto geladen. Als statischer Import würde ein
 // Ladefehler (CDN nicht erreichbar, alter Browser) die ganze App bei "Lade…" stehen lassen.
-const BACKGROUND_REMOVAL_URL = "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/index.mjs";
+// "+esm" ist wichtig: dist/index.mjs lädt onnxruntime-web über einen Paketnamen, den der Browser
+// nicht auflösen kann – damit schlug das Freistellen immer fehl.
+const BACKGROUND_REMOVAL_URL = "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/+esm";
 
 // Einheitlicher Hintergrund für freigestellte Fotos.
 const PHOTO_BACKGROUND = "#e8e8e8";
@@ -62,10 +64,12 @@ function showError(el, err) {
   el.innerHTML = `<p class="empty-hint">Fehler: <strong>${escapeHtml(err.code || "unbekannt")}</strong>${hint}<br><small>${escapeHtml(err.message || String(err))}</small></p>`;
 }
 
-function toast(msg) {
+let toastTimer = null;
+function toast(msg, ms = 1600) {
   toastEl.textContent = msg;
   toastEl.classList.add("show");
-  setTimeout(() => toastEl.classList.remove("show"), 1600);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove("show"), ms);
 }
 
 function slugify(text) {
@@ -83,121 +87,235 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-function readAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-function loadImage(dataUrl) {
+function loadImage(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
     img.onerror = reject;
-    img.src = dataUrl;
+    img.src = src;
   });
 }
 
-function drawToJpeg(img, maxDim, quality) {
-  let { width, height } = img;
-  if (width > height && width > maxDim) {
-    height = Math.round((height * maxDim) / width);
-    width = maxDim;
-  } else if (height > maxDim) {
-    width = Math.round((width * maxDim) / height);
-    height = maxDim;
+async function loadBlobImage(blob) {
+  const url = URL.createObjectURL(blob);
+  try {
+    return await loadImage(url);
+  } finally {
+    URL.revokeObjectURL(url);
   }
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  canvas.getContext("2d").drawImage(img, 0, 0, width, height);
-  return canvas.toDataURL("image/jpeg", quality);
 }
 
-// Verkleinert ein Foto (dataURL) so weit, bis es sicher unter die Firestore-Dokumentgrösse (1 MB) passt.
-async function compressDataUrl(dataUrl) {
-  const img = await loadImage(dataUrl);
+// Zeichnet ein Bild verkleinert (längste Seite max. maxDim) auf ein Canvas.
+function scaledCanvas(img, maxDim) {
+  const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(img.width * scale);
+  canvas.height = Math.round(img.height * scale);
+  canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+// Speichert so klein, dass es sicher in ein Firestore-Dokument (max. 1 MB) passt.
+function toJpegDataUrl(img) {
   let maxDim = 480;
-  let quality = 0.6;
-  let result = drawToJpeg(img, maxDim, quality);
-  while (result.length > 500_000 && maxDim > 160) {
+  let quality = 0.75;
+  let result = scaledCanvas(img, maxDim).toDataURL("image/jpeg", quality);
+  while (result.length > 300_000 && maxDim > 160) {
     maxDim = Math.round(maxDim * 0.7);
-    quality = Math.max(0.4, quality - 0.1);
-    result = drawToJpeg(img, maxDim, quality);
+    quality = Math.max(0.5, quality - 0.1);
+    result = scaledCanvas(img, maxDim).toDataURL("image/jpeg", quality);
   }
   return result;
 }
 
-async function compressImage(file) {
-  return compressDataUrl(await readAsDataUrl(file));
-}
-
-// Schneidet das Objekt frei (läuft komplett im Browser, kein Server/API-Key nötig) und
-// legt es auf einen einheitlichen Hintergrund. Das Modell (~ein paar MB) wird beim ersten
-// Aufruf pro Gerät heruntergeladen und danach vom Browser zwischengespeichert.
-async function cutoutWithBackground(file) {
-  const { default: removeBackground } = await import(BACKGROUND_REMOVAL_URL);
-  const cutoutBlob = await removeBackground(file, {
-    model: "isnet_quint8",
-    output: { type: "foreground", format: "image/png" },
-  });
-  const img = await loadImage(URL.createObjectURL(cutoutBlob));
-  const canvas = document.createElement("canvas");
-  canvas.width = img.width;
-  canvas.height = img.height;
-  const ctx = canvas.getContext("2d");
-  ctx.fillStyle = PHOTO_BACKGROUND;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(img, 0, 0);
-  return canvas.toDataURL("image/jpeg", 0.9);
-}
-
-async function processPhoto(file) {
-  try {
-    toast("Hintergrund wird entfernt… (erstes Mal kann etwas dauern)");
-    const cutoutDataUrl = await cutoutWithBackground(file);
-    return await compressDataUrl(cutoutDataUrl);
-  } catch (err) {
-    console.error("Freistellen fehlgeschlagen, speichere Originalfoto:", err);
-    toast("Freistellen nicht möglich – speichere normales Foto");
-    return await compressImage(file);
+// Fortschritt beim ersten Laden des KI-Modells (einmalig pro Gerät, danach im Browser-Cache).
+function backgroundRemovalProgress(key, current, total) {
+  if (key.startsWith("fetch:") && total) {
+    toast(`KI-Modell wird geladen… ${Math.round((current / total) * 100)}%`, 5000);
+  } else if (key.startsWith("compute:")) {
+    toast("Hintergrund wird entfernt…", 5000);
   }
 }
 
-// Ein gemeinsamer, versteckter Datei-Input für alle "Foto hinzufügen"-Buttons.
-const photoInput = document.createElement("input");
-photoInput.type = "file";
-photoInput.accept = "image/*";
-photoInput.capture = "environment";
-photoInput.style.display = "none";
-document.body.appendChild(photoInput);
-let pendingPhotoTarget = null;
+// Entfernt fast durchsichtige Reste der Freistellung und liefert das Rechteck um das Objekt.
+// Dafür wird das Bild in ein grobes Raster geteilt; es zählen nur zusammenhängende Flächen, die
+// mindestens 10 % so gross sind wie die grösste – vereinzelte Schlieren fallen so weg.
+function cleanupAndFindObject(canvas) {
+  const { width: w, height: h } = canvas;
+  const ctx = canvas.getContext("2d");
+  const image = ctx.getImageData(0, 0, w, h);
+  const data = image.data;
+  for (let i = 3; i < data.length; i += 4) {
+    if (data[i] < 96) data[i] = 0;
+  }
+  ctx.putImageData(image, 0, 0);
 
-photoInput.addEventListener("change", async () => {
-  const file = photoInput.files[0];
-  const target = pendingPhotoTarget;
-  photoInput.value = "";
-  if (!file || !target) return;
+  const cell = Math.max(2, Math.ceil(Math.max(w, h) / 128));
+  const gw = Math.ceil(w / cell);
+  const gh = Math.ceil(h / cell);
+  const solid = new Uint16Array(gw * gh);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (data[(y * w + x) * 4 + 3] > 160) solid[Math.floor(y / cell) * gw + Math.floor(x / cell)]++;
+    }
+  }
+  const occupied = solid.map((n) => (n > cell * cell * 0.3 ? 1 : 0));
+
+  // Zusammenhängende Flächen im Raster suchen.
+  const label = new Int32Array(gw * gh).fill(-1);
+  const components = [];
+  for (let start = 0; start < occupied.length; start++) {
+    if (!occupied[start] || label[start] >= 0) continue;
+    const comp = { size: 0, minX: gw, minY: gh, maxX: -1, maxY: -1 };
+    const stack = [start];
+    label[start] = components.length;
+    while (stack.length) {
+      const i = stack.pop();
+      const gx = i % gw;
+      const gy = (i - gx) / gw;
+      comp.size++;
+      comp.minX = Math.min(comp.minX, gx);
+      comp.maxX = Math.max(comp.maxX, gx);
+      comp.minY = Math.min(comp.minY, gy);
+      comp.maxY = Math.max(comp.maxY, gy);
+      for (const n of [gx > 0 && i - 1, gx < gw - 1 && i + 1, gy > 0 && i - gw, gy < gh - 1 && i + gw]) {
+        if (n !== false && occupied[n] && label[n] < 0) {
+          label[n] = components.length;
+          stack.push(n);
+        }
+      }
+    }
+    components.push(comp);
+  }
+  if (!components.length) throw new Error("Kein Objekt im Bild erkannt");
+
+  const largest = Math.max(...components.map((c) => c.size));
+  const kept = components.filter((c) => c.size >= largest * 0.1);
+  return {
+    minX: Math.min(...kept.map((c) => c.minX)) * cell,
+    minY: Math.min(...kept.map((c) => c.minY)) * cell,
+    maxX: Math.min(w - 1, (Math.max(...kept.map((c) => c.maxX)) + 1) * cell - 1),
+    maxY: Math.min(h - 1, (Math.max(...kept.map((c) => c.maxY)) + 1) * cell - 1),
+  };
+}
+
+// Schneidet das Objekt frei (läuft komplett im Browser, kein Server/API-Key nötig), schneidet auf
+// das Objekt zu und legt es zentriert auf einen quadratischen, einheitlichen Hintergrund.
+async function cutoutWithBackground(img) {
+  const { removeBackground } = await import(BACKGROUND_REMOVAL_URL);
+  // Handyfotos vorher verkleinern: schneller und braucht weniger Speicher.
+  const input = await new Promise((resolve) =>
+    scaledCanvas(img, 1024).toBlob(resolve, "image/jpeg", 0.9)
+  );
+  const cutoutBlob = await removeBackground(input, {
+    model: "isnet_quint8",
+    output: { format: "image/png" },
+    progress: backgroundRemovalProgress,
+  });
+  const cutout = scaledCanvas(await loadBlobImage(cutoutBlob), 1024);
+  const { minX, minY, maxX, maxY } = cleanupAndFindObject(cutout);
+
+  const boxW = maxX - minX + 1;
+  const boxH = maxY - minY + 1;
+  const side = Math.round(Math.max(boxW, boxH) * 1.15); // etwas Rand rundherum
+  const canvas = document.createElement("canvas");
+  canvas.width = side;
+  canvas.height = side;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = PHOTO_BACKGROUND;
+  ctx.fillRect(0, 0, side, side);
+  ctx.drawImage(cutout, minX, minY, boxW, boxH, (side - boxW) / 2, (side - boxH) / 2, boxW, boxH);
+  return canvas;
+}
+
+// Liefert das fertige Foto als JPEG-dataURL: freigestellt, sonst (Fehler/kein Objekt) das normale Foto.
+async function processPhoto(file) {
+  const img = await loadBlobImage(file);
+  try {
+    toast("Hintergrund wird entfernt… (beim ersten Mal kann es bis zu einer Minute dauern)", 5000);
+    const result = toJpegDataUrl(await cutoutWithBackground(img));
+    toast("Hintergrund entfernt");
+    return result;
+  } catch (err) {
+    console.error("Freistellen fehlgeschlagen, speichere normales Foto:", err);
+    toast("Freistellen nicht möglich – speichere normales Foto", 3000);
+    return toJpegDataUrl(img);
+  }
+}
+
+// Nur selbst erzeugte Bilder anzeigen (schützt vor eingeschleustem HTML/JS im Feld "photo").
+function isSafePhoto(photo) {
+  return typeof photo === "string" && photo.startsWith("data:image/jpeg;base64,");
+}
+
+// Artikel, deren Foto gerade verarbeitet wird ("containerId/itemId") – zeigt ⏳ statt 📷.
+const photosInProgress = new Set();
+let rerenderItems = () => {};
+
+// Verarbeitet ein Foto im Hintergrund und speichert es beim Artikel.
+async function savePhoto(containerId, itemId, file) {
+  const key = `${containerId}/${itemId}`;
+  photosInProgress.add(key);
+  rerenderItems();
   try {
     const photo = await processPhoto(file);
     await setDoc(
-      doc(db, "containers", target.containerId, "items", target.itemId),
+      doc(db, "containers", containerId, "items", itemId),
       { photo, updatedAt: serverTimestamp() },
       { merge: true }
     );
     toast("Foto gespeichert");
   } catch (err) {
     console.error(err);
-    toast(`Foto konnte nicht gespeichert werden (${err.code || err.message})`);
+    toast(`Foto konnte nicht gespeichert werden (${err.code || err.message})`, 4000);
+  } finally {
+    photosInProgress.delete(key);
+    rerenderItems();
   }
+}
+
+// Ein gemeinsamer, versteckter Datei-Input für "Foto ändern". Ohne `capture`, damit das Handy
+// die Wahl zwischen Kamera und Galerie (Upload) anbietet.
+const photoInput = document.createElement("input");
+photoInput.type = "file";
+photoInput.accept = "image/*";
+photoInput.style.display = "none";
+document.body.appendChild(photoInput);
+let pendingPhotoTarget = null;
+
+photoInput.addEventListener("change", () => {
+  const file = photoInput.files[0];
+  const target = pendingPhotoTarget;
+  photoInput.value = "";
+  if (file && target) savePhoto(target.containerId, target.itemId, file);
 });
 
 function openPhotoPicker(containerId, itemId) {
   pendingPhotoTarget = { containerId, itemId };
   photoInput.click();
+}
+
+// Grossansicht eines Fotos mit "Foto ändern".
+function showPhoto(item, onChange) {
+  const overlay = document.createElement("div");
+  overlay.className = "photo-overlay";
+  overlay.innerHTML = `
+    <div class="photo-dialog">
+      <img alt="" />
+      <strong></strong>
+      <div class="photo-actions">
+        <button type="button" data-action="change">📷 Foto ändern</button>
+        <button type="button" data-action="close" class="secondary">Schliessen</button>
+      </div>
+    </div>
+  `;
+  overlay.querySelector("img").src = item.photo;
+  overlay.querySelector("strong").textContent = item.name;
+  const close = () => overlay.remove();
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector('[data-action="close"]').addEventListener("click", close);
+  overlay.querySelector('[data-action="change"]').addEventListener("click", () => { close(); onChange(); });
+  document.body.appendChild(overlay);
 }
 
 // --- Anmeldung per E-Mail-Link (ohne Passwort) ---
@@ -353,9 +471,13 @@ function renderContainer(id) {
     <h1 id="container-title">…</h1>
     <div id="items"><p class="empty-hint">Lade…</p></div>
     <form class="add-form" id="add-item-form">
+      <label class="photo-pick" title="Foto aufnehmen oder hochladen">
+        <input name="photo" type="file" accept="image/*" hidden />
+        <span class="photo-pick-preview">📷</span>
+      </label>
       <input name="name" placeholder="Artikel (z.B. Milch)" required />
-      <input name="qty" type="number" min="1" value="1" style="max-width:70px" />
-      <select name="unit">
+      <input name="qty" type="number" min="1" value="1" inputmode="numeric" aria-label="Anzahl" style="max-width:70px" />
+      <select name="unit" aria-label="Einheit">
         <option value="Stk">Stk</option>
         <option value="Packung">Packung</option>
         <option value="g">g</option>
@@ -364,6 +486,26 @@ function renderContainer(id) {
       <button type="submit">+ Hinzufügen</button>
     </form>
   `;
+
+  const form = document.getElementById("add-item-form");
+  const photoPreview = form.querySelector(".photo-pick-preview");
+  let previewUrl = null;
+  function resetPhotoPreview() {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = null;
+    photoPreview.textContent = "📷";
+  }
+  form.photo.addEventListener("change", () => {
+    resetPhotoPreview();
+    const file = form.photo.files[0];
+    if (!file) return;
+    previewUrl = URL.createObjectURL(file);
+    const img = document.createElement("img");
+    img.src = previewUrl;
+    img.alt = "";
+    photoPreview.textContent = "";
+    photoPreview.appendChild(img);
+  });
 
   onSnapshot(doc(db, "containers", id), (snap) => {
     const title = document.getElementById("container-title");
@@ -376,7 +518,10 @@ function renderContainer(id) {
 
   const itemsEl = document.getElementById("items");
   const itemsQuery = query(collection(db, "containers", id, "items"), orderBy("name"));
-  onSnapshot(itemsQuery, (snap) => {
+  let lastSnap = null;
+  function renderItems() {
+    const snap = lastSnap;
+    if (!snap) return;
     if (snap.empty) {
       itemsEl.innerHTML = `<p class="empty-hint">Leer – füge unten etwas hinzu.</p>`;
       return;
@@ -384,11 +529,13 @@ function renderContainer(id) {
     itemsEl.innerHTML = "";
     snap.forEach((d) => {
       const item = d.data();
+      const hasPhoto = isSafePhoto(item.photo);
+      const busy = photosInProgress.has(`${id}/${d.id}`);
       const card = document.createElement("div");
       card.className = "card";
       card.innerHTML = `
-        <button class="thumb-btn" data-action="photo" title="Foto hinzufügen/ändern">
-          ${item.photo ? `<img src="${item.photo}" class="thumb" alt="${escapeHtml(item.name)}" />` : "📷"}
+        <button class="thumb-btn" data-action="photo" title="${hasPhoto ? "Foto anzeigen" : "Foto hinzufügen"}">
+          ${busy ? `<span class="spinner">⏳</span>` : hasPhoto ? `<img class="thumb" alt="" />` : "📷"}
         </button>
         <div class="name"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.unit || "")}</small></div>
         <div class="qty-controls">
@@ -398,30 +545,47 @@ function renderContainer(id) {
         </div>
         <button class="delete" data-action="del" title="Entfernen">🗑</button>
       `;
-      card.querySelector('[data-action="photo"]').addEventListener("click", () => openPhotoPicker(id, d.id));
+      const thumb = card.querySelector("img.thumb");
+      if (thumb) thumb.src = item.photo;
+      const pick = () => openPhotoPicker(id, d.id);
+      card.querySelector('[data-action="photo"]').addEventListener("click", () => {
+        if (busy) return;
+        if (hasPhoto) showPhoto(item, pick);
+        else pick();
+      });
       card.querySelector('[data-action="inc"]').addEventListener("click", () => changeQty(id, d.id, item, 1));
       card.querySelector('[data-action="dec"]').addEventListener("click", () => changeQty(id, d.id, item, -1));
       card.querySelector('[data-action="del"]').addEventListener("click", () => removeItem(id, d.id, item.name));
       itemsEl.appendChild(card);
     });
+  }
+  rerenderItems = renderItems;
+
+  onSnapshot(itemsQuery, (snap) => {
+    lastSnap = snap;
+    renderItems();
   }, (err) => showError(itemsEl, err));
 
-  document.getElementById("add-item-form").addEventListener("submit", async (e) => {
+  form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const name = e.target.name.value.trim();
-    const qty = Number(e.target.qty.value) || 1;
-    const unit = e.target.unit.value;
+    const name = form.name.value.trim();
+    const qty = Math.max(1, Math.round(Number(form.qty.value) || 1));
+    const unit = form.unit.value;
+    const photoFile = form.photo.files[0];
     if (!name) return;
     const itemId = slugify(name);
     try {
+      // Artikel sofort speichern, das Foto wird danach im Hintergrund freigestellt und ergänzt.
       await setDoc(
         doc(db, "containers", id, "items", itemId),
         { name, qty, unit, updatedAt: serverTimestamp() },
         { merge: true }
       );
-      e.target.reset();
-      e.target.qty.value = 1;
+      form.reset();
+      form.qty.value = 1;
+      resetPhotoPreview();
       toast(`"${name}" hinzugefügt`);
+      if (photoFile) savePhoto(id, itemId, photoFile);
     } catch (err) {
       console.error(err);
       toast(`Speichern fehlgeschlagen (${err.code || err.message})`);

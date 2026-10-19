@@ -49,17 +49,21 @@ den Haushaltsgebrauch völlig aus.
 ## 5. Benutzung
 
 - QR-Code am Kühlschrank scannen → öffnet direkt die Artikelliste dieses Kühlschranks.
-- Artikel hinzufügen über das Formular unten (Name, Menge, Einheit).
+- Artikel hinzufügen über das Formular unten: optional 📷 Foto (aufnehmen oder aus der Galerie
+  hochladen), Name, Anzahl, Einheit. Der Artikel erscheint sofort, das Foto wird im Hintergrund
+  verarbeitet (⏳) und dann ergänzt.
 - Menge über +/− anpassen; bei 0 wird der Artikel automatisch entfernt.
 - 🗑 löscht einen Artikel sofort komplett.
-- 📷-Button links am Artikel: Foto aufnehmen/auswählen. Das Objekt wird automatisch freigestellt
-  (Hintergrund entfernt) und auf einen einheitlichen hellgrauen Hintergrund gelegt, dann verkleinert
-  (Vorschaubild-Qualität) und direkt im Artikel-Dokument gespeichert. Erneut antippen ersetzt das Foto.
+- Vorschaubild links am Artikel: ohne Foto → 📷 antippen fügt eins hinzu; mit Foto → Grossansicht
+  mit "Foto ändern".
+- Fotos werden automatisch freigestellt (Hintergrund entfernt), auf das Objekt zugeschnitten, zentriert
+  auf einen einheitlichen hellgrauen, quadratischen Hintergrund gelegt, verkleinert (max. 480 px,
+  meist 10–40 KB) und direkt im Artikel-Dokument gespeichert.
   - Die Freistellung läuft komplett im Handy-Browser (Bibliothek `@imgly/background-removal`) –
     **kein** ChatGPT/Claude/Server/API-Key nötig, bleibt kostenlos.
-  - **Beim allerersten Mal pro Gerät** lädt der Browser dafür ein kleines KI-Modell herunter
-    (ein paar MB) – am besten beim ersten Foto im WLAN sein. Danach ist es im Browser zwischengespeichert
-    und geht schnell.
+  - **Beim allerersten Mal pro Gerät** lädt der Browser dafür ein KI-Modell herunter
+    (**ca. 56 MB**, Fortschritt wird angezeigt) – beim ersten Foto im WLAN sein. Danach ist es im
+    Browser zwischengespeichert, ein Foto dauert dann nur noch einige Sekunden.
   - Klappt die Freistellung mal nicht (z.B. sehr altes Handy/Browser ohne WebAssembly), wird automatisch
     das normale (nicht freigestellte) Foto gespeichert, statt dass gar nichts passiert.
 - Über "🏠 Übersicht" (oben) siehst du alle angelegten Behälter und kannst auch dort neue anlegen

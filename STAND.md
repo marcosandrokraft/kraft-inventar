@@ -18,6 +18,10 @@ Zugriff nur für freigeschaltete Personen.
   die in der Sammlung `members` stehen, plus Prüfung der Datenform (Name, Menge, Einheit, Fotogrösse).
 - Erste Person (Marco) freigeschaltet, Anmeldung getestet – funktioniert.
 - Service Worker ist "network-first": neue Versionen kommen nach 1–2× Neuladen an.
+- Fotos: Auswahl direkt beim Hinzufügen (Kamera oder Galerie), automatische Freistellung + Zuschnitt
+  auf das Objekt, grössere Vorschaubilder, Grossansicht mit "Foto ändern". Freistellung lokal in
+  Chrome getestet (vorher war sie wegen falscher Bibliothek-URL nie gelaufen). Erstes Foto pro Gerät
+  lädt ca. 56 MB KI-Modell → im WLAN machen.
 
 ## Weitere Person freischalten
 

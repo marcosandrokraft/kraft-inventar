@@ -82,8 +82,8 @@ h1 {
 
 .thumb-btn {
   flex-shrink: 0;
-  width: 2.6rem;
-  height: 2.6rem;
+  width: 3.4rem;
+  height: 3.4rem;
   border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--bg);
@@ -100,6 +100,87 @@ h1 {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.spinner {
+  display: inline-block;
+  animation: pulse 1s ease-in-out infinite alternate;
+}
+
+@keyframes pulse { from { opacity: 0.35; } to { opacity: 1; } }
+
+/* Foto-Auswahl im "Hinzufügen"-Formular */
+.photo-pick {
+  flex: 0 0 auto;
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.photo-pick img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Grossansicht eines Fotos */
+.photo-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 10;
+}
+
+.photo-dialog {
+  background: var(--card);
+  border-radius: 14px;
+  padding: 1rem;
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  text-align: center;
+}
+
+.photo-dialog img {
+  width: 100%;
+  border-radius: 10px;
+}
+
+.photo-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.photo-actions button {
+  flex: 1;
+  padding: 0.6rem;
+  border-radius: 8px;
+  border: none;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.photo-actions button.secondary {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
 }
 
 .card .name {
