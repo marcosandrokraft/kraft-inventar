@@ -35,16 +35,57 @@ Zusätzlich: Der alte Service Worker (`sw.js`) lieferte immer die zwischengespei
 neue Uploads kamen auf bereits besuchten Geräten nie an. Jetzt "network-first" (Cache `vorrat-shell-v2`).
 Auf Geräten, die die Seite schon kannten, nach dem Upload die Seite 1–2× neu laden.
 
+## Sicherheit: Anmeldung per E-Mail-Link (eingebaut 2026-10-19)
+
+- Die App zeigt ohne Anmeldung nur noch ein Anmeldefeld. Man gibt die E-Mail ein, bekommt einen Link,
+  klickt ihn an und bleibt auf dem Gerät angemeldet. Oben rechts gibt es "Abmelden".
+- [firestore.rules](firestore.rules) lässt nur Adressen zu, für die in der Firestore-Sammlung `members`
+  ein Dokument existiert (Dokument-ID = E-Mail in Kleinbuchstaben). Die Adressen stehen bewusst
+  **nicht** im Code/Repo (öffentlich), und die App selbst kann die Liste weder lesen noch ändern.
+- Kosten: Spark-Plan ohne Zahlungsmittel. Bei Überlastung/Angriff stoppt Firebase bis zum nächsten Tag,
+  es entsteht nie eine Rechnung.
+
 ## Nächste Schritte (in dieser Reihenfolge)
 
-1. Geänderte Dateien auf GitHub hochladen (überschreiben):
-   `app.js`, `sw.js`, `firebase-config.js`, `firestore.rules`, `STAND.md`
-2. Inhalt von `firestore.rules` in Firebase-Konsole → Firestore → Regeln einfügen & veröffentlichen
-3. Database ID prüfen (siehe oben)
-4. Spark-Plan/Abrechnung bestätigen
-5. GitHub Pages aktivieren (falls noch nicht geschehen)
-6. Live-Seite neu laden, Fehlermeldung (falls noch vorhanden) hier eintragen
-7. QR-Codes über `qr.html` erzeugen und testen (zwei Geräte gleichzeitig)
+1. **Spark-Plan prüfen:** Firebase-Konsole → Zahnrad → "Nutzung und Abrechnung" → Tarif muss "Spark"
+   sein, kein Zahlungsmittel hinterlegt.
+2. **Database ID prüfen:** Firestore Database → oben im Auswahlfeld. Nicht `(default)`? → in
+   `firebase-config.js` bei `firestoreDatabaseId` eintragen.
+3. **E-Mail-Link-Anmeldung einschalten:** Build → Authentication → "Jetzt starten" →
+   Reiter "Sign-in method" → "E-Mail/Passwort" → beide Schalter aktivieren
+   ("E-Mail/Passwort" **und** "E-Mail-Link (Anmeldung ohne Passwort)") → Speichern.
+4. **Domain freigeben:** Authentication → Reiter "Einstellungen" → "Autorisierte Domains" →
+   "Domain hinzufügen" → `marcosandrokraft.github.io`.
+5. **GitHub Pages aktivieren** (falls noch nicht): Repo → Settings → Pages → Branch `main`, `/ (root)`.
+6. **Code hochladen** (`git push` oder Drag&Drop von `app.js`, `index.html`, `style.css`,
+   `firebase-config.js`, `firestore.rules`, `STAND.md`).
+7. **Anmeldung testen:** https://marcosandrokraft.github.io/kraft-inventar/ öffnen (ggf. 1–2× neu laden),
+   E-Mail eingeben, Link aus der Mail öffnen (Hotmail: Junk-Ordner prüfen). Man sollte die Übersicht sehen.
+8. **Dich freischalten:** Firestore Database → Reiter "Daten" → "Sammlung starten" → Sammlungs-ID
+   `members` → Dokument-ID: deine E-Mail-Adresse in Kleinbuchstaben → ein Feld, z.B. `name` (string)
+   mit deinem Namen → Speichern.
+9. **Regeln veröffentlichen:** Firestore Database → Reiter "Regeln" → kompletten Inhalt von
+   `firestore.rules` einfügen → "Veröffentlichen". Danach Seite neu laden: Muss weiterhin funktionieren.
+   Gegenprobe: in einem privaten Fenster ohne Anmeldung kommt man nicht an Daten.
+10. **QR-Codes** über `qr.html` erzeugen und testen.
+
+### Optional, zusätzlich (ebenfalls kostenlos)
+
+11. **App Check (blockt Skripte, die nicht von der Webseite kommen):**
+    - https://www.google.com/recaptcha/admin/create → Typ "reCAPTCHA v3", Domain
+      `marcosandrokraft.github.io` → Websiteschlüssel und geheimen Schlüssel kopieren.
+    - Firebase-Konsole → Build → App Check → Web-App auswählen → "reCAPTCHA" → geheimen Schlüssel einfügen.
+    - Websiteschlüssel in `firebase-config.js` bei `appCheckSiteKey` eintragen, hochladen, ein paar Tage
+      testen. Wenn unter App Check → APIs → Cloud Firestore fast alles "verifiziert" ist → "Erzwingen".
+12. **API-Key einschränken:** https://console.cloud.google.com/apis/credentials (Projekt kraft-inventar)
+    → "Browser key" → Anwendungseinschränkungen: "Websites" → eintragen:
+    `https://marcosandrokraft.github.io/*` und `https://kraft-inventar.firebaseapp.com/*` → Speichern.
+
+### Weitere Person freischalten
+
+In der Firebase-Konsole in der Sammlung `members` ein Dokument hinzufügen (Dokument-ID = ihre E-Mail in
+Kleinbuchstaben). Regeln müssen dafür nicht geändert werden. Die Person öffnet die App und meldet sich
+mit genau dieser Adresse an. Entfernen = Dokument löschen. **Adressen nie in Dateien im Repo schreiben.**
 
 ## Projektstruktur
 

@@ -13,3 +13,7 @@ export const firebaseConfig = {
 // Firestore "Database ID" – steht in der Firebase-Konsole unter Firestore Database oben im
 // Datenbank-Auswahlfeld. Nur ändern, wenn dort NICHT "(default)" steht.
 export const firestoreDatabaseId = "(default)";
+
+// Optional: reCAPTCHA-v3-Websiteschlüssel für Firebase App Check (siehe STAND.md).
+// Leer lassen, solange App Check nicht eingerichtet ist.
+export const appCheckSiteKey = "";

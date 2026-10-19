@@ -1,8 +1,22 @@
 rules_version = '2';
-// Kein Login: jeder mit der URL darf lesen/schreiben, aber nur Daten in der erwarteten Form.
-// Verhindert, dass jemand beliebige Sammlungen/grosse Dokumente anlegt und das Gratis-Kontingent aufbraucht.
+// Nur angemeldete Personen aus der Liste unten dürfen lesen/schreiben, und nur Daten in der erwarteten Form.
+// Verhindert, dass Fremde mit der URL Daten sehen oder das Gratis-Kontingent aufbrauchen.
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // Freigeschaltete Adressen stehen NICHT hier (Repo ist öffentlich), sondern in der Sammlung
+    // "members": pro Person ein Dokument, Dokument-ID = E-Mail-Adresse in Kleinbuchstaben.
+    // Anlegen nur über die Firebase-Konsole (siehe STAND.md).
+    function isMember() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && exists(/databases/$(database)/documents/members/$(request.auth.token.email.lower()));
+    }
+
+    // Die Mitgliederliste kann aus der App weder gelesen noch geändert werden.
+    match /members/{email} {
+      allow read, write: if false;
+    }
 
     function validName(d) {
       return d.name is string && d.name.size() > 0 && d.name.size() <= 100;
@@ -24,13 +38,13 @@ service cloud.firestore {
     }
 
     match /containers/{containerId} {
-      allow read: if true;
-      allow create, update: if containerId.size() <= 100 && validContainer(request.resource.data);
+      allow read: if isMember();
+      allow create, update: if isMember() && containerId.size() <= 100 && validContainer(request.resource.data);
       allow delete: if false;
 
       match /items/{itemId} {
-        allow read, delete: if true;
-        allow create, update: if itemId.size() <= 100 && validItem(request.resource.data);
+        allow read, delete: if isMember();
+        allow create, update: if isMember() && itemId.size() <= 100 && validItem(request.resource.data);
       }
     }
   }

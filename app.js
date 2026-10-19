@@ -11,6 +11,14 @@ import {
   query,
   orderBy,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import {
+  getAuth,
+  onAuthStateChanged,
+  sendSignInLinkToEmail,
+  isSignInWithEmailLink,
+  signInWithEmailLink,
+  signOut,
+} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 
 // Freistellungs-Bibliothek wird erst beim ersten Foto geladen. Als statischer Import würde ein
 // Ladefehler (CDN nicht erreichbar, alter Browser) die ganze App bei "Lade…" stehen lassen.
@@ -20,6 +28,24 @@ const BACKGROUND_REMOVAL_URL = "https://cdn.jsdelivr.net/npm/@imgly/background-r
 const PHOTO_BACKGROUND = "#e8e8e8";
 
 const app = initializeApp(config.firebaseConfig);
+
+// Optional: App Check (reCAPTCHA v3) – lässt nur Anfragen von dieser Webseite zu.
+// Aktiv, sobald in firebase-config.js `appCheckSiteKey` eingetragen ist.
+if (config.appCheckSiteKey) {
+  try {
+    const { initializeAppCheck, ReCaptchaV3Provider } = await import(
+      "https://www.gstatic.com/firebasejs/10.14.1/firebase-app-check.js"
+    );
+    initializeAppCheck(app, {
+      provider: new ReCaptchaV3Provider(config.appCheckSiteKey),
+      isTokenAutoRefreshEnabled: true,
+    });
+  } catch (err) {
+    console.error("App Check konnte nicht gestartet werden:", err);
+  }
+}
+
+const auth = getAuth(app);
 // Falls beim Anlegen der Firestore-Datenbank eine eigene "Database ID" vergeben wurde,
 // in firebase-config.js `export const firestoreDatabaseId = "..."` eintragen.
 const db = getFirestore(app, config.firestoreDatabaseId || "(default)");
@@ -30,7 +56,10 @@ const toastEl = document.getElementById("toast");
 // Zeigt einen Firestore-Fehler sichtbar an statt endlos "Lade…".
 function showError(el, err) {
   console.error(err);
-  el.innerHTML = `<p class="empty-hint">Fehler: <strong>${escapeHtml(err.code || "unbekannt")}</strong><br><small>${escapeHtml(err.message || String(err))}</small></p>`;
+  const hint = err.code === "permission-denied" && auth.currentUser
+    ? `<br>Angemeldet als ${escapeHtml(auth.currentUser.email || "?")} – diese Adresse ist nicht freigeschaltet.`
+    : "";
+  el.innerHTML = `<p class="empty-hint">Fehler: <strong>${escapeHtml(err.code || "unbekannt")}</strong>${hint}<br><small>${escapeHtml(err.message || String(err))}</small></p>`;
 }
 
 function toast(msg) {
@@ -171,14 +200,111 @@ function openPhotoPicker(containerId, itemId) {
   photoInput.click();
 }
 
+// --- Anmeldung per E-Mail-Link (ohne Passwort) ---
+
+const EMAIL_KEY = "emailForSignIn";
+let loginError = null;
+
+function storageGet(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+
+function storageSet(key, value) {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {}
+}
+
+// Entfernt die Login-Parameter aus der Adresszeile, behält aber ?c= (Behälter vom QR-Code).
+function cleanUrl() {
+  const url = new URL(location.href);
+  const c = url.searchParams.get("c");
+  url.search = c ? `?c=${encodeURIComponent(c)}` : "";
+  history.replaceState(null, "", url.href);
+}
+
+// Wird aufgerufen, wenn die Seite über den Link aus der Anmelde-Mail geöffnet wurde.
+async function completeEmailLinkSignIn() {
+  if (!isSignInWithEmailLink(auth, location.href)) return;
+  // Mail auf einem anderen Gerät geöffnet als angefordert → Adresse ist dort nicht gespeichert.
+  const email = storageGet(EMAIL_KEY)
+    || prompt("Zur Bestätigung bitte nochmals deine E-Mail-Adresse eingeben:");
+  if (email) {
+    try {
+      await signInWithEmailLink(auth, email.trim(), location.href);
+      storageSet(EMAIL_KEY, null);
+    } catch (err) {
+      console.error(err);
+      loginError = err.code === "auth/invalid-action-code"
+        ? "Der Link ist abgelaufen oder wurde schon benutzt. Bitte neuen Link anfordern."
+        : `Anmeldung fehlgeschlagen (${err.code || err.message})`;
+    }
+  }
+  cleanUrl();
+}
+
+function renderLogin() {
+  main.innerHTML = `
+    <h1>Anmelden</h1>
+    <p class="muted">Gib deine E-Mail-Adresse ein. Du bekommst einen Link, mit dem du dich ohne Passwort
+      anmeldest. Danach bleibst du auf diesem Gerät angemeldet.</p>
+    <form class="add-form" id="login-form">
+      <input name="email" type="email" autocomplete="email" placeholder="E-Mail-Adresse" required />
+      <button type="submit">Link senden</button>
+    </form>
+    <p class="muted" id="login-status">${loginError ? escapeHtml(loginError) : ""}</p>
+  `;
+  const status = document.getElementById("login-status");
+  document.getElementById("login-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const email = e.target.email.value.trim();
+    if (!email) return;
+    status.textContent = "Sende Link…";
+    try {
+      // Nach dem Klick auf den Link landet man wieder genau hier (inkl. ?c= vom QR-Code).
+      await sendSignInLinkToEmail(auth, email, { url: location.href, handleCodeInApp: true });
+      storageSet(EMAIL_KEY, email);
+      status.textContent = `Link an ${email} gesendet. Bitte Mail öffnen (auch im Junk-/Spam-Ordner nachschauen).`;
+    } catch (err) {
+      console.error(err);
+      status.textContent = `Senden fehlgeschlagen (${err.code || err.message})`;
+    }
+  });
+}
+
+function showLogout(user) {
+  const btn = document.getElementById("logout-btn");
+  if (!btn) return;
+  btn.hidden = false;
+  btn.title = user.email || "";
+  btn.addEventListener("click", async () => {
+    await signOut(auth);
+    location.reload();
+  });
+}
+
 const params = new URLSearchParams(location.search);
 const containerId = params.get("c");
 
-if (containerId) {
-  renderContainer(containerId);
-} else {
-  renderOverview();
-}
+await completeEmailLinkSignIn();
+
+let started = false;
+onAuthStateChanged(auth, (user) => {
+  if (!user) {
+    if (started) location.reload(); // in anderem Tab abgemeldet
+    else renderLogin();
+    return;
+  }
+  if (started) return;
+  started = true;
+  showLogout(user);
+  if (containerId) {
+    renderContainer(containerId);
+  } else {
+    renderOverview();
+  }
+});
 
 function renderOverview() {
   main.innerHTML = `
