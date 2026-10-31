@@ -59,3 +59,24 @@ sind für Firebase garantiert offline: Es wird kein echtes Projekt angesprochen,
 kein `firebase login`, und es wird nichts deployt. Die Warnung „You are not currently
 authenticated“ beim Start kann ignoriert werden. Testnutzer verwenden nur Platzhalter-Adressen
 (`@example.com`).
+
+## Browser-Smoke-Tests (Playwright)
+
+`tests/e2e/smoke.mjs` startet einen lokalen Webserver und öffnet die App in Edge/Chrome (headless,
+`playwright-core` – kein Browser-Download, benutzt den installierten Edge bzw. Chrome; anderer Pfad
+über `E2E_BROWSER_PATH`, Fenster sichtbar mit `E2E_HEADED=1`). Firebase wird komplett durch
+In-Memory-Fakes ersetzt (`tests/e2e/fake-firebase/`), Anfragen an Google/Firebase werden blockiert
+und als Fehler gewertet. Geprüft: Übersicht und Suche, +/− per increment ohne Foto, Rückgängig,
+Menge addieren, Verschieben, XSS, keine CSP-Verletzungen, QR lokal, Handy-Layout (360 px, Knöpfe ≥ 44 px),
+Doppeltipp, ungültige Links.
+
+```sh
+npm run test:e2e
+```
+
+Optional, lädt ca. 56 MB aus dem Netz: prüft, ob die echte Freistellungs-Bibliothek unter der
+Content-Security-Policy aus `index.html` funktioniert:
+
+```sh
+npm run test:e2e:cutout
+```

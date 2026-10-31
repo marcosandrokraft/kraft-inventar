@@ -1,6 +1,6 @@
 # Aktueller Stand
 
-Letzter Stand: 2026-10-19. Diese Datei fasst den Fortschritt zusammen, damit man (auch mit einer
+Letzter Stand: 2026-10-31 (Branch `verbesserungen-2026-10-31`, noch nicht gemergt). Diese Datei fasst den Fortschritt zusammen, damit man (auch mit einer
 neuen Claude-Session auf einem anderen Gerät) nahtlos weitermachen kann.
 
 **Die App läuft:** https://marcosandrokraft.github.io/kraft-inventar/ – mit Anmeldung per E-Mail-Link,
@@ -59,12 +59,53 @@ Die Person öffnet die App und meldet sich mit genau dieser Adresse an. Entferne
 
 ### Ideen / bekannte Kleinigkeiten
 
-- +/− schreibt den ganzen Artikel neu (inkl. Foto); gleichzeitiges Drücken auf zwei Geräten kann eine
-  Änderung überschreiben. Besser: Firestore `increment()`.
-- Gleichen Artikel nochmals hinzufügen überschreibt die Menge statt sie zu addieren.
+- Erledigt am 2026-10-31: +/− per `increment()`, gleicher Artikel addiert die Menge.
+- Weitere Ideen, die eine Entscheidung brauchen: [VORSCHLAEGE.md](VORSCHLAEGE.md).
+
+## Session 2026-10-31: Verbesserungen (Branch `verbesserungen-2026-10-31`)
+
+**Was du tun musst (in dieser Reihenfolge):**
+
+1. **Branch ansehen und testen**, z.B. lokal mit einem kleinen Webserver
+   (`npx http-server .` oder VS Code "Live Server") – Achtung: Anmelden funktioniert nur auf
+   autorisierten Domains; `localhost` ist in Firebase standardmässig autorisiert.
+   Besonders prüfen: **Foto mit Freistellung** (wegen der neuen Content-Security-Policy).
+2. **Regeln veröffentlichen:** Firebase-Konsole → Firestore Database → Regeln → kompletten Inhalt
+   von [firestore.rules](firestore.rules) einfügen → Veröffentlichen. Ohne das funktioniert die App
+   trotzdem (die Suche fragt dann jeden Behälter einzeln ab), aber die strengeren Prüfungen
+   (IDs, Fotoformat) sind erst danach aktiv.
+3. **Mergen und pushen:** `git checkout main && git merge verbesserungen-2026-10-31 && git push`.
+   Danach auf den Handys 1–2× neu laden (Service Worker v3).
+4. Fragen in [VORSCHLAEGE.md](VORSCHLAEGE.md) beantworten.
+
+**Geändert:**
+
+- Sicherheit: strengere Regeln (IDs im App-Format beim Anlegen, Foto nur als JPEG-data-URL, Token muss
+  E-Mail enthalten), Content-Security-Policy in index.html/qr.html (keine Inline-Skripte), QR-Codes
+  werden lokal erzeugt statt über api.qrserver.com (Behälter-Links gehen nicht mehr an Fremde),
+  Service Worker speichert keine Anmelde-Links (oobCode) und keine Fehlerseiten mehr, Abmelden löscht
+  die Offline-Kopie der Daten, strengere Foto-Prüfung und HTML-Escaping in der App.
+- Bedienung: Suche "Wo ist …?" über alle Behälter, Menge addieren statt überschreiben, +/− per
+  increment, Entfernen mit "Rückgängig", Detailansicht mit Verschieben, Zahl antippen = Menge eingeben,
+  Behälter umbenennen, QR pro Behälter/für alle drucken (mit Druckgrösse), In-App-Scanner (Android),
+  Filter in grossen Behältern, Autovervollständigung, grössere Knöpfe (≥44 px), kein iOS-Zoom.
+- Leistung/Offline: Firestore-Offline-Speicher (Inhalt nach dem Scan sofort da, Änderungen ohne Netz
+  werden nachgereicht), Firebase-Bibliotheken im Service Worker zwischengespeichert, App-Dateien
+  vorab gecacht, modulepreload; Artikel der Suche werden erst beim ersten Tippen geladen.
+- Tests: siehe [TESTS.md](TESTS.md). Stand 2026-10-31: `npm test` 29/29, `npm run test:rules` 42/42
+  (Emulator mit portabler Java 17), `npm run test:e2e` 9/9 (Edge headless, Firebase gefälscht),
+  `npm run test:e2e:cutout` ok (echte Freistellung unter der CSP).
+- Nicht getestet: echte Anmeldung/echte Datenbank, iPhone/Safari, BarcodeDetector-Scanner auf dem Handy.
+- Datenformat unverändert, alte QR-Codes funktionieren weiter. Neue QR-Codes enthalten zusätzlich
+  `&n=Name`, damit ein neu gescannter Behälter gleich richtig heisst.
+
+**Falls nach dem Update etwas nicht geht:** Browser-Konsole öffnen; steht dort "Refused to load …
+Content Security Policy", die gemeldete Adresse in der `Content-Security-Policy`-Zeile in
+index.html ergänzen (oder die Zeile vorübergehend löschen).
 
 ## Projektstruktur
 
 Siehe [README.md](README.md) für die Einrichtungsanleitung (Firebase, GitHub Pages, QR-Codes).
-Code-Dateien: `index.html`, `app.js`, `qr.html`, `style.css`, `manifest.json`, `icon.svg`, `sw.js`,
-`firebase-config.js`, `firestore.rules`.
+Code-Dateien: `index.html`, `app.js`, `lib.js`, `qr.html`, `qr.js`, `vendor/`, `register-sw.js`,
+`style.css`, `manifest.json`, `icon.svg`, `sw.js`, `firebase-config.js`, `firestore.rules`.
+Tests: `tests/`, `package.json`, `firebase.json` (siehe [TESTS.md](TESTS.md)).
