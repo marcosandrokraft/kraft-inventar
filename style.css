@@ -305,6 +305,8 @@ form.add-form button {
   text-decoration: none;
   color: var(--text);
 }
+.container-list a.card { display: flex; }
+.card .name small { display: block; }
 
 .muted { color: var(--muted); font-size: 0.9rem; }
 

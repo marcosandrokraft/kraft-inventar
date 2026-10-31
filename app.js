@@ -960,7 +960,7 @@ onAuthStateChanged(auth, (user) => {
 });
 
 function typeOptions(selected = "") {
-  return `<option value="">Typ (optional)</option>` + Object.entries(CONTAINER_TYPES)
+  return `<option value="">Typ –</option>` + Object.entries(CONTAINER_TYPES)
     .map(([v, label]) => `<option value="${v}"${v === selected ? " selected" : ""}>${label}</option>`).join("");
 }
 
