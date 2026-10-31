@@ -3,17 +3,24 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'" />
+<meta name="referrer" content="no-referrer" />
 <title>QR-Codes</title>
 <link rel="stylesheet" href="style.css" />
 <link rel="icon" href="icon.svg" />
 <style>
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-top: 1rem; }
-  .qr-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 1rem; text-align: center; }
-  .qr-card img { width: 100%; max-width: 220px; height: auto; }
-  .qr-card .label { margin-top: 0.4rem; font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--qr-size, 160px), 1fr)); gap: 1rem; margin-top: 1rem; }
+  .qr-card { background: #fff; color: #000; border: 1px dashed #bbb; border-radius: 10px; padding: 0.6rem; text-align: center; break-inside: avoid; }
+  .qr-card svg { width: 100%; height: auto; display: block; }
+  .qr-card .label { margin-top: 0.3rem; font-weight: 700; font-size: 1.05rem; word-break: break-word; }
+  .qr-card .url { font-size: 0.6rem; color: #555; word-break: break-all; }
+  .qr-options { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
   @media print {
-    header, form, .muted { display: none !important; }
-    .grid { gap: 0.8rem; }
+    body { background: #fff; padding: 0; }
+    header, form, .muted, .no-print { display: none !important; }
+    main { max-width: none; padding: 0; }
+    .grid { gap: 4mm; grid-template-columns: repeat(auto-fill, minmax(var(--qr-print, 45mm), 1fr)); }
+    .qr-card { border: 1px dashed #999; }
   }
 </style>
 </head>
@@ -23,41 +30,26 @@
 </header>
 <main>
   <h1>QR-Codes zum Drucken</h1>
-  <p class="muted">Ein Behälter pro Zeile (Anzeigename). Der Link wird automatisch aus dem Namen erzeugt. Danach ausdrucken, ausschneiden und auf den Behälter kleben.</p>
+  <p class="muted">Ein Behälter pro Zeile (Anzeigename). Der Link wird automatisch aus dem Namen erzeugt. Danach ausdrucken
+    (Druckbogen), ausschneiden und auf den Behälter kleben. Die QR-Codes werden direkt hier im Browser erzeugt – es
+    werden keine Daten an fremde Dienste geschickt.</p>
   <form class="add-form" id="gen-form" style="flex-direction:column; align-items:stretch;">
-    <textarea name="names" rows="5" placeholder="Kühlschrank&#10;Gefrierfach&#10;Vorratsschrank&#10;Kleiderschrank Marco" style="width:100%; padding:0.6rem; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text);"></textarea>
-    <button type="submit" style="align-self:flex-start;">QR-Codes erzeugen</button>
+    <textarea name="names" rows="5" maxlength="10000" placeholder="Kühlschrank&#10;Gefrierfach&#10;Vorratsschrank&#10;Kleiderschrank Marco" style="width:100%; padding:0.6rem; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text);"></textarea>
+    <div class="qr-options">
+      <label class="muted">Grösse beim Drucken
+        <select name="size">
+          <option value="35mm">klein (3.5 cm)</option>
+          <option value="45mm" selected>mittel (4.5 cm)</option>
+          <option value="65mm">gross (6.5 cm)</option>
+        </select>
+      </label>
+      <button type="submit">QR-Codes erzeugen</button>
+      <button type="button" id="print-btn" class="no-print" hidden>🖨 Drucken</button>
+    </div>
   </form>
   <div class="grid" id="grid"></div>
 </main>
-<script type="module">
-  function slugify(text) {
-    return text.toString().toLowerCase().trim()
-      .replace(/[^a-z0-9äöüß]+/g, "-")
-      .replace(/(^-|-$)/g, "");
-  }
-
-  const baseUrl = new URL("index.html", location.href);
-  const grid = document.getElementById("grid");
-
-  document.getElementById("gen-form").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const names = e.target.names.value.split("\n").map(s => s.trim()).filter(Boolean);
-    grid.innerHTML = "";
-    names.forEach((name) => {
-      const id = slugify(name);
-      const url = `${baseUrl.href}?c=${encodeURIComponent(id)}`;
-      const qrImg = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(url)}`;
-      const card = document.createElement("div");
-      card.className = "qr-card";
-      card.innerHTML = `
-        <img src="${qrImg}" alt="QR-Code ${name}" />
-        <div class="label">${name}</div>
-        <div class="muted" style="word-break:break-all;">${url}</div>
-      `;
-      grid.appendChild(card);
-    });
-  });
-</script>
+<script src="vendor/qrcode-generator-1.4.4.js"></script>
+<script type="module" src="qr.js"></script>
 </body>
 </html>
