@@ -1,7 +1,7 @@
 rules_version = '2';
 // Nur angemeldete Personen aus der Liste unten dürfen lesen/schreiben, und nur Daten in der erwarteten Form.
 // Verhindert, dass Fremde mit der URL Daten sehen oder das Gratis-Kontingent aufbrauchen.
-// Tests: tests/rules.test.mjs (siehe TESTS.md).
+// Tests: tests/rules/rules.test.mjs (siehe TESTS.md).
 service cloud.firestore {
   match /databases/{database}/documents {
 

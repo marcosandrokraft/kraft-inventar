@@ -25,9 +25,9 @@ Im Firebase-Konsolen-Menü **Firestore Database → Regeln** den kompletten Inha
 Artikel in der erwarteten Form (Namenslänge, Menge, Einheit, Fotogrösse), damit niemand das
 Gratis-Kontingent mit beliebigen Daten füllen kann.
 
-**Wichtig:** Das bedeutet, jeder mit der App-URL kann lesen/schreiben (wie gewünscht, kein Login).
-Die URL/QR-Codes also nicht öffentlich posten, nur an die Familie weitergeben. Das reicht für
-den Haushaltsgebrauch völlig aus.
+Lesen und Schreiben dürfen nur angemeldete Personen, die in der Sammlung `members` stehen
+(Anmeldung per E-Mail-Link, siehe [STAND.md](STAND.md)). Nach jeder Änderung an `firestore.rules`
+die Regeln in der Konsole erneut veröffentlichen.
 
 ## 3. Auf GitHub Pages veröffentlichen
 
@@ -43,17 +43,29 @@ den Haushaltsgebrauch völlig aus.
 
 1. Öffne auf dem Handy oder PC `.../qr.html` deiner veröffentlichten Seite.
 2. Trage pro Zeile einen Behälter-Namen ein (z.B. `Kühlschrank`, `Gefrierfach`, `Vorratsschrank`,
-   `Kleiderschrank Marco`) und klicke "QR-Codes erzeugen".
-3. Seite ausdrucken, QR-Codes ausschneiden und auf die jeweiligen Behälter/Schränke kleben.
+   `Kleiderschrank Marco`) und klicke "QR-Codes erzeugen". Oder in der App: "🖨 QR-Codes für alle
+   Behälter drucken" (Übersicht) bzw. "QR" im Behälter.
+3. Druckgrösse wählen, ausdrucken, QR-Codes ausschneiden und auf die Behälter/Schränke kleben.
+   Die Codes werden lokal im Browser erzeugt (kein Fremddienst).
+4. Tipp: Statt/zusätzlich zum QR-Code kann derselbe Link auf einen NFC-Sticker geschrieben werden
+   (z.B. mit der App "NFC Tools") – Handy dranhalten öffnet den Behälter.
 
 ## 5. Benutzung
 
-- QR-Code am Kühlschrank scannen → öffnet direkt die Artikelliste dieses Kühlschranks.
+- QR-Code am Kühlschrank scannen → öffnet direkt die Artikelliste dieses Kühlschranks
+  (Kamera-App, oder in der App "📷 Scan" – auf Android/Chrome).
+- **Wo ist …?** Suchfeld oben in der Übersicht durchsucht alle Behälter (Gross/klein und Umlaute
+  egal). Ein Treffer öffnet den Behälter und markiert den Artikel.
 - Artikel hinzufügen über das Formular unten: optional 📷 Foto (aufnehmen oder aus der Galerie
   hochladen), Name, Anzahl, Einheit. Der Artikel erscheint sofort, das Foto wird im Hintergrund
   verarbeitet (⏳) und dann ergänzt.
-- Menge über +/− anpassen; bei 0 wird der Artikel automatisch entfernt.
-- 🗑 löscht einen Artikel sofort komplett.
+- Gibt es den Artikel schon, wird die Menge addiert (bei anderer Einheit fragt die App nach).
+- Menge über +/− anpassen oder die Zahl antippen und direkt eingeben; bei 0 wird der Artikel entfernt.
+- 🗑 entfernt einen Artikel sofort – unten erscheint kurz "Rückgängig".
+- Artikelnamen antippen → Details: Foto, **Verschieben** in einen anderen Behälter, Entfernen.
+- ✏️ neben dem Behälternamen benennt ihn um (der QR-Code bleibt gültig).
+- Ohne Netz: Zuletzt angesehene Inhalte bleiben sichtbar, Änderungen werden später übertragen
+  ("Offline" oben). Abmelden löscht die Offline-Kopie auf dem Gerät.
 - Vorschaubild links am Artikel: ohne Foto → 📷 antippen fügt eins hinzu; mit Foto → Grossansicht
   mit "Foto ändern".
 - Fotos werden automatisch freigestellt (Hintergrund entfernt), auf das Objekt zugeschnitten, zentriert
@@ -73,6 +85,11 @@ den Haushaltsgebrauch völlig aus.
 ## Dateien
 
 - `index.html` / `app.js` – Haupt-App (Übersicht + Behälter-Ansicht je nach `?c=`-Parameter)
-- `qr.html` – QR-Code-Generator zum Drucken
+- `lib.js` – reine Logik (IDs, Suche, Mengen, Zuschnitt), getestet in `tests/unit`
+- `qr.html` / `qr.js` / `vendor/qrcode-generator-1.4.4.js` – QR-Code-Druckbogen
+- `register-sw.js` – registriert den Service Worker
+- `tests/`, `package.json`, `firebase.json` – nur für Tests (siehe [TESTS.md](TESTS.md)), die App
+  selbst braucht keinen Build-Schritt
+- [VORSCHLAEGE.md](VORSCHLAEGE.md) – offene Ideen, die eine Entscheidung brauchen
 - `firebase-config.js` – deine persönlichen Firebase-Zugangsdaten (ausfüllen!)
 - `manifest.json`, `icon.svg`, `sw.js` – fürs Installieren als App (PWA)
