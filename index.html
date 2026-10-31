@@ -5,11 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <!--
   Content-Security-Policy: erlaubt Skripte nur von hier, Firebase (gstatic/google) und der
-  Freistellungs-Bibliothek (jsdelivr/staticimgly, braucht WebAssembly). Eingeschleuste Inline-Skripte
-  würden blockiert. Falls nach einem Update etwas nicht mehr geht: Browser-Konsole zeigt
+  Freistellungs-Bibliothek (jsdelivr/staticimgly, braucht WebAssembly und 'unsafe-eval' – ohne das
+  schlägt die Freistellung mit EvalError fehl, getestet mit tests/e2e/csp-cutout.mjs). Eingeschleuste
+  Inline-Skripte und onerror=-Handler würden weiterhin blockiert. Falls nach einem Update etwas nicht mehr geht: Browser-Konsole zeigt
   "Refused to …" mit der blockierten Adresse.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://www.google.com https://cdn.jsdelivr.net https://staticimgly.com 'wasm-unsafe-eval' blob:; connect-src 'self' https://*.googleapis.com https://www.google.com https://*.firebaseapp.com https://cdn.jsdelivr.net https://staticimgly.com data: blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; frame-src https://*.firebaseapp.com https://www.google.com https://recaptcha.google.com; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://www.google.com https://cdn.jsdelivr.net https://staticimgly.com 'wasm-unsafe-eval' 'unsafe-eval' blob:; connect-src 'self' https://*.googleapis.com https://www.google.com https://*.firebaseapp.com https://cdn.jsdelivr.net https://staticimgly.com data: blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; frame-src https://*.firebaseapp.com https://www.google.com https://recaptcha.google.com; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'" />
 <title>Vorrat</title>
 <meta name="theme-color" content="#2f6f4f" />
 <link rel="manifest" href="manifest.json" />

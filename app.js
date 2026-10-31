@@ -733,6 +733,11 @@ function renderOverview() {
 // --- Behälter-Ansicht ---
 
 function renderContainer(id) {
+  // Ein "/" in ?c= würde einen ungültigen Firestore-Pfad ergeben (Seite bliebe bei "Lade…").
+  if (!id || id.includes("/")) {
+    main.innerHTML = `<p class="empty-hint">Ungültiger Behälter-Link.<br><a href="index.html">Zur Übersicht</a></p>`;
+    return;
+  }
   main.innerHTML = `
     <div class="title-row">
       <h1 id="container-title">…</h1>
@@ -879,8 +884,9 @@ function renderContainer(id) {
         else openPhotoPicker(id, itemId);
       });
       card.querySelector('[data-action="details"]').addEventListener("click", () => showItemDetails(id, itemId, item));
-      card.querySelector('[data-action="inc"]').addEventListener("click", () => changeQty(id, itemId, item, 1));
-      card.querySelector('[data-action="dec"]').addEventListener("click", () => changeQty(id, itemId, item, -1));
+      // Immer den neuesten Stand nehmen (schnelles Doppeltippen vor dem nächsten Snapshot).
+      card.querySelector('[data-action="inc"]').addEventListener("click", () => changeQty(id, itemId, currentItems.get(itemId) || item, 1));
+      card.querySelector('[data-action="dec"]').addEventListener("click", () => changeQty(id, itemId, currentItems.get(itemId) || item, -1));
       card.querySelector('[data-action="set"]').addEventListener("click", () => setQty(id, itemId, item));
       card.querySelector('[data-action="del"]').addEventListener("click", () => removeItem(id, itemId, item));
       itemsEl.appendChild(card);
@@ -924,8 +930,8 @@ function renderContainer(id) {
     if (plan.action === "conflict") {
       const ok = confirm(`"${existing.name}" ist schon vorhanden (${plan.oldQty} ${plan.oldUnit}).\nDurch ${qty} ${unit} ersetzen?`);
       if (!ok) return;
-      write = setDoc(itemRef(id, itemId), { name, qty, unit, updatedAt: serverTimestamp() }, { merge: true });
-      message = `"${name}": jetzt ${qty} ${unit}`;
+      write = setDoc(itemRef(id, itemId), { name: existing.name, qty, unit, updatedAt: serverTimestamp() }, { merge: true });
+      message = `"${existing.name}": jetzt ${qty} ${unit}`;
     } else {
       // increment() addiert auf dem Server – auch wenn gleichzeitig jemand anderes etwas ändert.
       // Gibt es den Artikel noch nicht, wird die Menge einfach gesetzt.
@@ -956,6 +962,7 @@ function changeQty(containerId, itemId, item, delta) {
     return;
   }
   if (newQty > MAX_QTY) return;
+  item.qty = newQty; // lokal mitzählen, bis der nächste Snapshot den echten Stand bringt
   background(updateDoc(itemRef(containerId, itemId), { qty: increment(delta), updatedAt: serverTimestamp() }));
 }
 
