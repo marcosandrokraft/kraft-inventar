@@ -8,6 +8,7 @@
 // - Jeder Schreibzugriff landet in window.__writes: { op, path, data, options } mit Platzhaltern
 //   { __op: "increment", by } bzw. { __op: "serverTimestamp" } für Sentinels.
 // - window.__fakeDb() liefert den aktuellen Stand (Pfad → Daten) für Prüfungen.
+// - window.__queries: einmalige Abfragen (getDocs) dieser Seite.
 
 const STORE_KEY = "__fakeFirestore";
 const WRITES_KEY = "__fakeFirestoreWrites";
@@ -215,7 +216,14 @@ function querySnapshot(q) {
 }
 
 export async function getDoc(ref) { return docSnapshot(ref); }
-export async function getDocs(q) { return querySnapshot(q); }
+// Einmalige Abfragen (getDocs) werden in window.__queries mitgezählt (pro Seite, nicht gespeichert):
+// "collectionGroup:items" bzw. der Pfad der Sammlung – damit Tests Lesezugriffe prüfen können.
+window.__queries = [];
+export async function getDocs(q) {
+  const base = q.type === "query" ? q.base : q;
+  window.__queries.push(base.type === "collectionGroup" ? `collectionGroup:${base.collectionId}` : base.path);
+  return querySnapshot(q);
+}
 export const getDocFromCache = getDoc;
 export const getDocsFromCache = getDocs;
 export const getDocFromServer = getDoc;

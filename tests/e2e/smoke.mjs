@@ -536,7 +536,7 @@ test("13 Navigation unten und 'zuletzt geöffnet' (Handy 360 px)", async () => {
     return { scroll: de.scrollWidth, client: de.clientWidth, nav };
   });
   assert(m.scroll <= m.client, `horizontale Scrollbar ${m.scroll} > ${m.client}`);
-  assertEqual(m.nav.length, 4, "4 Einträge");
+  assertEqual(m.nav.length, 5, "5 Einträge (Runde 3: + Läuft ab)");
   for (const b of m.nav) assert(b.w >= 44 && b.h >= 44, `Nav-Knopf zu klein: ${b.w}×${b.h}`);
 
   await page.locator('#bottom-nav [data-nav="recent"]').tap();
@@ -576,6 +576,7 @@ test("14 Umzugsmodus: mehrere Artikel auf einmal verschieben, Rückgängig", asy
   await page.click("#select-move");
   await page.waitForSelector('.photo-dialog [data-action="ok"]:not([disabled])');
   assertEqual(await page.textContent(".photo-dialog strong"), "3 Artikel", "Dialogtitel");
+  assertEqual(await page.locator('.photo-dialog [data-action="scan"]').count(), 0, "ohne BarcodeDetector kein Scan-Knopf");
   await page.selectOption("#move-target", "garage");
   await page.click('.photo-dialog [data-action="ok"]');
   await card(page, "nudeln").waitFor({ state: "detached" });
@@ -739,6 +740,173 @@ test("18 Umzug: 'Alle' wählt nur gefilterte Artikel; Dialog über der Leiste", 
   await card(page, "milch").waitFor({ state: "detached" });
   const db = await t.db();
   assert(db["containers/garage/items/milch"] && db["containers/keller/items/dose-1"], "nur Milch verschoben");
+  await t.done();
+});
+
+// Lokales Datum in `days` Tagen als "YYYY-MM-DD" (Testrechner und Browser haben dieselbe Zeitzone).
+function isoIn(days) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+test("19 Liste 'läuft bald ab': Filter 3/7 Tage, Sortierung, Pfad, Öffnen markiert (360 px)", async () => {
+  const t = await open("index.html", {
+    viewport: { width: 360, height: 740 }, isMobile: true, hasTouch: true,
+    seed: {
+      ...HOUSE,
+      "containers/kuehlschrank/items/milch": { name: "Milch", qty: 1, unit: "l", mhd: isoIn(0) },
+      "containers/kuehlschrank/items/joghurt": { name: "Joghurt", qty: 2, unit: "Stk", mhd: isoIn(3), photo: PHOTO },
+      "containers/gemuesefach/items/salat": { name: "Salat mit einem sehr langen Namen, der umbrechen muss", qty: 1, unit: "Stk", mhd: isoIn(-2) },
+      "containers/keller/items/butter": { name: "Butter", qty: 1, unit: "Packung", mhd: isoIn(5) },
+      "containers/keller/items/senf": { name: "Senf", qty: 1, unit: "Glas", mhd: isoIn(8) },
+      "containers/lose-box/items/xss": { name: XSS, qty: 1, unit: "Stk", mhd: isoIn(1) },
+    },
+  });
+  const { page } = t;
+  await page.waitForSelector("#container-list a.card");
+  assertEqual(await page.evaluate(() => window.__queries), [], "Übersicht lädt keine Artikel");
+  assert(await page.locator('.list-links a[href="index.html?liste=ablauf"]').count() === 1, "Link in der Übersicht");
+
+  await page.locator('#bottom-nav [data-nav="ablauf"]').tap();
+  await page.waitForURL(/\?liste=ablauf$/);
+  await page.waitForSelector("#expiring-list a.card");
+  assertEqual(await page.getAttribute('#bottom-nav [data-nav="ablauf"]', "aria-current"), "page", "Leiste markiert");
+  const rows = () => page.locator("#expiring-list a.card").evaluateAll((as) => as.map((a) => ({
+    name: a.querySelector("strong").textContent,
+    when: a.querySelector(".mhd").textContent,
+    cls: a.querySelector(".mhd").className,
+    where: a.querySelector("small b").textContent,
+    href: a.getAttribute("href"),
+  })));
+  let r = await rows();
+  assertEqual(r.map((x) => x.name), ["Salat mit einem sehr langen Namen, der umbrechen muss", "Milch", XSS, "Joghurt"], "≤ 3 Tage, nach Datum");
+  assert(r[0].when.startsWith("abgelaufen seit 2 Tagen") && r[0].cls.includes("mhd-expired"), `abgelaufen: ${r[0].when}`);
+  assert(r[1].when.startsWith("heute") && r[1].cls.includes("mhd-soon"), `heute: ${r[1].when}`);
+  assert(r[3].when.startsWith("in 3 Tagen"), `in 3 Tagen: ${r[3].when}`);
+  assertEqual(r[0].where, "Küche › Kühlschrank › Gemüsefach", "voller Pfad");
+  assertEqual(r[3].href, "index.html?c=kuehlschrank#i=joghurt", "Link mit Markierung");
+  assert(await page.evaluate(() => !window.__xss), "XSS nicht ausgeführt");
+  assertEqual(await page.textContent("#expiring-count"), "4 Artikel, davon 1 abgelaufen", "Zähler");
+  assertEqual(await page.getAttribute('[data-days="3"]', "aria-pressed"), "true", "3 Tage aktiv");
+
+  // Handy: keine horizontale Scrollbar, Knöpfe gross genug
+  const m = await page.evaluate(() => ({
+    scroll: document.documentElement.scrollWidth,
+    client: document.documentElement.clientWidth,
+    sizes: [...document.querySelectorAll(".segmented button, #expiring-list a.card, #bottom-nav a, #bottom-nav button")].map((b) => b.getBoundingClientRect()).map((x) => [x.width, x.height]),
+  }));
+  assert(m.scroll <= m.client, `horizontale Scrollbar ${m.scroll} > ${m.client}`);
+  for (const [w, h] of m.sizes) assert(w >= 44 && h >= 44, `Ziel zu klein: ${w}×${h}`);
+
+  // ≤ 7 Tage: Butter (in 5) dazu, Senf (in 8) nicht; keine neue Abfrage
+  await page.locator('[data-days="7"]').tap();
+  await waitUntil(page, () => document.querySelectorAll("#expiring-list a.card").length === 5);
+  r = await rows();
+  assertEqual(r[4].name, "Butter", "Butter am Ende");
+  assert(r[4].cls.includes("mhd-ok"), "in 5 Tagen nicht orange");
+  assertEqual(await page.evaluate(() => window.__queries), ["collectionGroup:items"], "eine einzige Abfrage aller Artikel");
+
+  // Antippen öffnet den Behälter und markiert den Artikel
+  await page.locator('#expiring-list a.card[data-id="joghurt"]').tap();
+  await page.waitForURL(/\?c=kuehlschrank#i=joghurt$/);
+  await page.waitForSelector('#items .card[data-id="joghurt"].highlight', { timeout: 3000 });
+
+  // Zeitraum bleibt auf diesem Gerät gemerkt
+  await page.goto(server.url + "index.html?liste=ablauf");
+  await page.waitForSelector("#expiring-list a.card");
+  assertEqual(await page.getAttribute('[data-days="7"]', "aria-pressed"), "true", "7 Tage gemerkt");
+
+  // Nichts fällig → Hinweis
+  await page.evaluate(async () => {
+    const fs = await import("/vendor/firebase-10.14.1/firebase-firestore.js");
+    for (const [c, i] of [["kuehlschrank", "milch"], ["kuehlschrank", "joghurt"], ["gemuesefach", "salat"], ["keller", "butter"], ["lose-box", "xss"]]) {
+      await fs.deleteDoc(fs.doc(fs.getFirestore(), "containers", c, "items", i));
+    }
+  });
+  await page.reload();
+  await page.waitForSelector("#expiring-list .empty-hint:has-text('Nichts läuft')");
+  await t.done();
+});
+
+// BarcodeDetector + Kamera für den In-App-Scanner fälschen. Codes kommen aus window.__scanQueue.
+const FAKE_SCANNER = () => {
+  window.__scanQueue = [];
+  window.BarcodeDetector = class {
+    static async getSupportedFormats() { return ["qr_code"]; }
+    constructor(opts) { this.formats = opts.formats; }
+    async detect() {
+      const v = window.__scanQueue.shift();
+      return v ? [{ rawValue: v, format: "qr_code" }] : [];
+    }
+  };
+  const fakeGetUserMedia = async () => {
+    const c = document.createElement("canvas");
+    c.width = 64;
+    c.height = 64;
+    const ctx = c.getContext("2d");
+    let n = 0;
+    setInterval(() => { ctx.fillStyle = n++ % 2 ? "#333" : "#666"; ctx.fillRect(0, 0, 64, 64); }, 50);
+    return c.captureStream(20);
+  };
+  if (!navigator.mediaDevices) Object.defineProperty(navigator, "mediaDevices", { value: {} });
+  navigator.mediaDevices.getUserMedia = fakeGetUserMedia;
+};
+
+test("20 Umzug: Ziel per QR-Code scannen (BarcodeDetector-Fake), unbekannte Behälter abgelehnt", async () => {
+  const t = await open("index.html?c=keller", {
+    init: FAKE_SCANNER,
+    seed: {
+      "containers/keller": { name: "Keller" },
+      "containers/dachboden": { name: "Dachboden" },
+      "containers/garage": { name: "Garage", parent: "dachboden" },
+      "containers/keller/items/nudeln": { name: "Nudeln", qty: 3, unit: "Packung" },
+      "containers/keller/items/reis": { name: "Reis", qty: 2, unit: "Packung" },
+      "containers/keller/items/salz": { name: "Salz", qty: 1, unit: "Packung" },
+    },
+  });
+  const { page } = t;
+  const scan = async (url) => {
+    await page.click('.photo-dialog [data-action="scan"]');
+    await page.waitForSelector(".photo-dialog video.scanner-video");
+    await page.evaluate((u) => window.__scanQueue.push(u), url);
+  };
+  const hint = () => page.textContent("#move-hint");
+  await page.waitForSelector('#items .card[data-id="nudeln"]');
+  await page.click("#select-btn");
+  for (const id of ["nudeln", "reis"]) await page.click(`#items .select-card[data-id="${id}"]`);
+  await page.click("#select-move");
+  await page.waitForSelector('.photo-dialog [data-action="scan"]:not([disabled])');
+  assertEqual(await page.inputValue("#move-target"), "dachboden", "Vorauswahl unverändert (erstes Ziel)");
+
+  // Fremder Code: Hinweis, Scanner sucht weiter
+  await scan("https://example.org/irgendwas?c=garage");
+  await waitUntil(page, () => document.getElementById("toast").textContent.includes("kein QR-Code dieser App"));
+  assertEqual(await page.locator("video.scanner-video").count(), 1, "Scanner bleibt offen");
+  // danach unbekannter Behälter dieser App → abgelehnt, nichts angelegt
+  await page.evaluate((u) => window.__scanQueue.push(u), server.url + "index.html?c=neue-box&n=Neue%20Box");
+  await page.waitForSelector("video.scanner-video", { state: "detached" });
+  assert((await hint()).includes("„Neue Box“ gibt es noch nicht"), `Hinweis unbekannt: ${await hint()}`);
+  assertEqual(await page.inputValue("#move-target"), "dachboden", "Auswahl nicht geändert");
+
+  // Eigener Behälter → abgelehnt
+  await scan(server.url + "index.html?c=keller&n=Keller");
+  await page.waitForSelector("video.scanner-video", { state: "detached" });
+  assert((await hint()).includes("aus dem verschoben wird"), `Hinweis gleicher Behälter: ${await hint()}`);
+
+  // Gültiges Ziel → nur ausgewählt, verschoben wird erst mit "Verschieben"
+  await scan(server.url + "index.html?c=garage&n=Garage");
+  await page.waitForSelector("video.scanner-video", { state: "detached" });
+  assertEqual(await page.inputValue("#move-target"), "garage", "Ziel ausgewählt");
+  assertEqual(await hint(), 'Ziel: Dachboden › Garage – mit "Verschieben" bestätigen.', "Hinweis mit Pfad");
+  assertEqual(await t.writes(), [], "noch nichts geschrieben");
+  await page.click('.photo-dialog [data-action="ok"]');
+  await card(page, "nudeln").waitFor({ state: "detached" });
+  const db = await t.db();
+  assert(db["containers/garage/items/nudeln"] && db["containers/garage/items/reis"], "verschoben nach Garage");
+  assert(db["containers/keller/items/salz"], "Salz bleibt");
+  assert(!("containers/neue-box" in db), "unbekannter Behälter nicht angelegt");
+  assert(!(await t.writes()).some((w) => w.path.startsWith("containers/neue-box")), "keine Schreibzugriffe auf neue-box");
   await t.done();
 });
 
