@@ -44,6 +44,7 @@ import {
   normalizeSearch,
   searchItems,
   containerIdFromScan,
+  moveTargetFromScan,
   containerUrl,
   findObjectBounds,
   planStep,
@@ -63,6 +64,9 @@ import {
   formatDate,
   parseDatesFromText,
   parseGs1Expiry,
+  EXPIRY_WINDOWS,
+  expiringItems,
+  daysText,
 } from "./lib.js";
 
 // Freistellungs-Bibliothek wird erst beim ersten Foto geladen. Als statischer Import würde ein
@@ -599,6 +603,8 @@ async function showMoveDialog(fromId, entries, onDone = () => {}) {
     <strong></strong>
     <label class="muted" for="move-target">Verschieben nach:</label>
     <select id="move-target" class="big-select"><option value="">Lade…</option></select>
+    ${canScan ? `<div class="photo-actions"><button type="button" data-action="scan" class="secondary" disabled>📷 Ziel-QR-Code scannen</button></div>` : ""}
+    <small class="muted" id="move-hint" role="status"></small>
     <div class="photo-actions">
       <button type="button" data-action="ok" disabled>Verschieben</button>
       <button type="button" data-action="close" class="secondary">Abbrechen</button>
@@ -613,6 +619,7 @@ async function showMoveDialog(fromId, entries, onDone = () => {}) {
       ? targets.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.label)}</option>`).join("")
       : `<option value="">Kein anderer Behälter vorhanden</option>`;
     ok.disabled = !targets.length;
+    setupMoveScan(overlay, fromId, targets);
     ok.addEventListener("click", () => {
       const target = targets.find((c) => c.id === select.value);
       if (!target) return;
@@ -623,6 +630,45 @@ async function showMoveDialog(fromId, entries, onDone = () => {}) {
     console.error(err);
     select.innerHTML = `<option value="">Fehler: ${escapeHtml(err.code || err.message)}</option>`;
   }
+}
+
+// Umzugsziel per QR-Code (nur wo der In-App-Scanner geht). Der Code muss ein Behälter-Link dieser
+// App sein (gleiche Prüfung wie beim normalen Scan). Ein unbekannter Behälter wird hier bewusst NICHT
+// angelegt – sonst entstünde durch einen Fehlscan ein leerer Behälter, in den Artikel verschwinden.
+// Der Scan wählt das Ziel nur aus; verschoben wird erst mit "Verschieben".
+function setupMoveScan(overlay, fromId, targets) {
+  const btn = overlay.querySelector('[data-action="scan"]');
+  if (!btn) return;
+  const select = overlay.querySelector("#move-target");
+  const hint = overlay.querySelector("#move-hint");
+  btn.disabled = false;
+  select.addEventListener("change", () => { hint.textContent = ""; hint.classList.remove("move-hint-ok"); });
+  btn.addEventListener("click", () => {
+    let warned = false;
+    openScanner({
+      hint: "QR-Code des Ziel-Behälters ins Bild halten",
+      onCode: (raw) => {
+        const r = moveTargetFromScan(raw, location.href, fromId, allContainers);
+        if (r.error === "invalid") {
+          if (!warned) { warned = true; toast("Das ist kein QR-Code dieser App"); }
+          return false;
+        }
+        if (!overlay.isConnected) return true;
+        hint.classList.remove("move-hint-ok");
+        if (r.error === "same") {
+          hint.textContent = "Das ist der Behälter, aus dem verschoben wird. Bitte ein anderes Ziel scannen.";
+        } else if (r.error === "unknown" || !targets.some((t) => t.id === r.id)) {
+          hint.textContent = `„${r.name || r.id}“ gibt es noch nicht – als Ziel nicht möglich. Behälter zuerst öffnen bzw. anlegen (QR-Code normal scannen), dann erneut verschieben.`;
+        } else {
+          select.value = r.id;
+          hint.textContent = `Ziel: ${pathLabel(r.id)} – mit "Verschieben" bestätigen.`;
+          hint.classList.add("move-hint-ok");
+        }
+        toast(hint.textContent, 4000);
+        return true;
+      },
+    });
+  });
 }
 
 function itemBackup(item) {
@@ -725,6 +771,38 @@ async function moveItems(fromId, entries, target) {
   }
 }
 
+// --- Alle Artikel (für die Suche "Wo ist …?" und die Liste "läuft bald ab") ---
+// Werden erst geladen, wenn sie gebraucht werden (erstes Tippen in der Suche bzw. Öffnen der Liste),
+// und dann für diese Seite gemerkt: eine Abfrage statt einer pro Tastendruck (spart Lesezugriffe).
+// Ergebnis: [{ id, containerId, name, qty, unit, mhd?, photo? }].
+let allItemsPromise = null;
+
+function loadAllItems() {
+  if (!allItemsPromise) {
+    allItemsPromise = fetchAllItems().catch((err) => {
+      allItemsPromise = null; // beim nächsten Mal erneut versuchen
+      throw err;
+    });
+  }
+  return allItemsPromise;
+}
+
+async function fetchAllItems() {
+  let docs;
+  try {
+    docs = (await getDocs(collectionGroup(db, "items"))).docs;
+  } catch (err) {
+    // Ältere Regeln (ohne Collection-Group-Freigabe): Behälter einzeln abfragen.
+    if (err.code !== "permission-denied") throw err;
+    await containersReady();
+    const snaps = await Promise.all([...allContainers.keys()].map((id) => getDocs(collection(db, "containers", id, "items"))));
+    docs = snaps.flatMap((s) => s.docs);
+  }
+  return docs
+    .filter((d) => d.ref.parent.parent?.parent.id === "containers")
+    .map((d) => ({ id: d.id, containerId: d.ref.parent.parent.id, ...d.data() }));
+}
+
 // --- QR-Scanner in der App (Android/Chrome: BarcodeDetector; sonst normale Kamera-App benutzen) ---
 
 const SCANNED_KEY = "scannedContainer";
@@ -753,7 +831,10 @@ function mayAutoCreate(id) {
 
 const canScan = "BarcodeDetector" in window && !!navigator.mediaDevices?.getUserMedia;
 
-async function openScanner() {
+// Kamera-Scanner. Ohne Optionen: Behälter-QR-Code → Behälter öffnen (legt ihn ggf. an).
+// Mit `onCode(rawValue)`: der Aufrufer prüft den Code selbst (z.B. Umzugsziel); liefert onCode
+// true, wird der Scanner geschlossen, sonst wird weitergesucht.
+async function openScanner({ hint = "QR-Code eines Behälters ins Bild halten", onCode = null } = {}) {
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
@@ -763,9 +844,10 @@ async function openScanner() {
   }
   const { overlay, close } = openDialog(`
     <video class="scanner-video" playsinline muted autoplay></video>
-    <span class="muted">QR-Code eines Behälters ins Bild halten</span>
+    <span class="muted"></span>
     <div class="photo-actions"><button type="button" data-action="close" class="secondary">Abbrechen</button></div>
   `);
+  overlay.querySelector("span.muted").textContent = hint;
   const video = overlay.querySelector("video");
   video.srcObject = stream;
   let active = true;
@@ -784,6 +866,14 @@ async function openScanner() {
     try {
       if (video.readyState >= 2) {
         for (const code of await detector.detect(video)) {
+          if (onCode) {
+            if (onCode(code.rawValue)) {
+              stop();
+              close();
+              return;
+            }
+            continue;
+          }
           const id = containerIdFromScan(code.rawValue, location.href);
           if (id) {
             stop();
@@ -993,11 +1083,15 @@ function setupBottomNav() {
     else toast("Auf diesem Gerät: QR-Code mit der Kamera-App scannen", 4000);
   });
   nav.querySelector('[data-nav="recent"]').addEventListener("click", showRecentDialog);
-  if (!containerId) nav.querySelector('[data-nav="home"]').setAttribute("aria-current", "page");
+  const current = containerId ? null : listView(listName) ? listName : "home";
+  if (current) nav.querySelector(`[data-nav="${current}"]`)?.setAttribute("aria-current", "page");
 }
 
 const params = new URLSearchParams(location.search);
 const containerId = params.get("c");
+// Listen über alle Behälter: ?liste=ablauf ("läuft bald ab"). Platz für weitere Listen (z.B. später
+// ?liste=einkauf für die Einkaufsliste Küche/Kühlschrank) – siehe listView().
+const listName = containerId ? null : params.get("liste");
 
 await completeEmailLinkSignIn();
 watchOnline();
@@ -1016,6 +1110,8 @@ onAuthStateChanged(auth, (user) => {
   watchContainers();
   if (containerId) {
     renderContainer(containerId);
+  } else if (listView(listName)) {
+    listView(listName)();
   } else {
     renderOverview();
   }
@@ -1050,6 +1146,7 @@ function renderOverview() {
     </div>
     <div id="search-results" class="search-results" hidden></div>
     <div id="recent" class="recent-chips" hidden></div>
+    <div class="list-links"><a class="chip" href="index.html?liste=ablauf">⏰ Läuft bald ab</a></div>
     <h1>Deine Behälter</h1>
     <div class="container-list" id="container-list"><p class="empty-hint">Lade…</p></div>
     <p class="muted"><a id="qr-all" href="qr.html">🖨 QR-Codes für alle Behälter drucken</a></p>
@@ -1103,22 +1200,6 @@ function renderOverview() {
   // Suche über alle Behälter. Die Artikel werden erst beim ersten Tippen geladen (spart Lesezugriffe).
   let allItems = null;
   let loading = null;
-
-  async function loadAllItems() {
-    let docs;
-    try {
-      docs = (await getDocs(collectionGroup(db, "items"))).docs;
-    } catch (err) {
-      // Ältere Regeln (ohne Collection-Group-Freigabe): Behälter einzeln abfragen.
-      if (err.code !== "permission-denied") throw err;
-      await containersReady();
-      const snaps = await Promise.all([...allContainers.keys()].map((id) => getDocs(collection(db, "containers", id, "items"))));
-      docs = snaps.flatMap((s) => s.docs);
-    }
-    return docs
-      .filter((d) => d.ref.parent.parent?.parent.id === "containers")
-      .map((d) => ({ id: d.id, containerId: d.ref.parent.parent.id, ...d.data() }));
-  }
 
   function showResults() {
     const q = searchInput.value;
@@ -1175,7 +1256,7 @@ function renderOverview() {
     searchInput.focus();
   }
 
-  document.getElementById("scan-btn")?.addEventListener("click", openScanner);
+  document.getElementById("scan-btn")?.addEventListener("click", () => openScanner());
 
   document.getElementById("new-container-form").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -1197,6 +1278,85 @@ function renderOverview() {
     e.target.reset();
     toast(`"${name}" angelegt`);
   });
+}
+
+// --- Listen über alle Behälter ---
+
+// Name in ?liste= → Ansicht (oder null). Muss zu data-nav in index.html passen.
+// (Funktion statt Objekt: wird schon beim Start gebraucht, und ?liste=constructor o.ä. trifft nichts.)
+function listView(name) {
+  switch (name) {
+    case "ablauf": return renderExpiring;
+    default: return null;
+  }
+}
+
+const EXPIRY_WINDOW_KEY = "expiryWindow";
+
+// Liste "läuft bald ab": alle Artikel mit MHD abgelaufen oder in ≤ 3 (bzw. 7) Tagen, das früheste
+// zuerst, mit Behälterpfad. Antippen öffnet den Behälter und markiert den Artikel (#i=…).
+// Lädt die Artikel einmal (gleiche Ladelogik wie die Suche) – erst wenn die Liste geöffnet wird.
+function renderExpiring() {
+  let days = Number(storageGet(EXPIRY_WINDOW_KEY));
+  if (!EXPIRY_WINDOWS.includes(days)) days = EXPIRY_WINDOWS[0];
+  document.title = "Läuft bald ab – Vorrat";
+  main.innerHTML = `
+    <h1>Läuft bald ab</h1>
+    <div class="segmented" role="group" aria-label="Zeitraum">
+      ${EXPIRY_WINDOWS.map((d) => `<button type="button" data-days="${d}">≤ ${d} Tage</button>`).join("")}
+    </div>
+    <p class="muted" id="expiring-count"></p>
+    <div class="container-list" id="expiring-list"><p class="empty-hint">Lade…</p></div>
+  `;
+  const list = document.getElementById("expiring-list");
+  const count = document.getElementById("expiring-count");
+  const buttons = main.querySelectorAll("[data-days]");
+  let items = null;
+
+  function render() {
+    buttons.forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.days) === days)));
+    if (!items) return;
+    const hits = expiringItems(items, new Date(), days);
+    const expired = hits.filter((it) => it.days < 0).length;
+    count.textContent = hits.length
+      ? `${hits.length} Artikel${expired ? `, davon ${expired} abgelaufen` : ""}`
+      : "";
+    if (!hits.length) {
+      list.innerHTML = `<p class="empty-hint">Nichts läuft in den nächsten ${days} Tagen ab.</p>`;
+      return;
+    }
+    list.innerHTML = "";
+    for (const it of hits) {
+      const status = mhdStatus(it.mhd, new Date());
+      const when = it.days < 0 ? `abgelaufen ${daysText(it.days)}` : daysText(it.days);
+      const a = document.createElement("a");
+      a.className = "card result expiring";
+      a.dataset.id = it.id;
+      a.dataset.cid = it.containerId;
+      a.href = `index.html?c=${encodeURIComponent(it.containerId)}#i=${encodeURIComponent(it.id)}`;
+      a.innerHTML = `
+        <span class="thumb-btn small">${isSafePhoto(it.photo) ? `<img class="thumb" alt="" decoding="async" />` : "📦"}</span>
+        <div class="name"><strong>${escapeHtml(it.name)}</strong>
+          <small><span class="mhd mhd-${status}">${escapeHtml(when)} · ${escapeHtml(formatDate(it.mhd))}</span></small>
+          <small>${escapeHtml(String(it.qty ?? 1))} ${escapeHtml(it.unit || "")} · in <b>${escapeHtml(pathLabel(it.containerId))}</b></small></div>
+        <div aria-hidden="true">›</div>`;
+      const img = a.querySelector("img");
+      if (img) img.src = it.photo;
+      list.appendChild(a);
+    }
+  }
+
+  buttons.forEach((b) => b.addEventListener("click", () => {
+    days = Number(b.dataset.days);
+    storageSet(EXPIRY_WINDOW_KEY, String(days));
+    render();
+  }));
+  render();
+  // Pfade aktualisieren, sobald (bzw. wenn sich) die Behälter geladen/geändert haben.
+  onContainers((err) => { if (!err) render(); });
+  loadAllItems()
+    .then((all) => { items = all; render(); })
+    .catch((err) => showError(list, err));
 }
 
 // --- Behälter bearbeiten: Name, Typ, "liegt in", löschen ---
