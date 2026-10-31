@@ -30,10 +30,16 @@ service cloud.firestore {
       return d.name is string && d.name.size() > 0 && d.name.size() <= 100;
     }
 
-    function validContainer(d) {
-      return d.keys().hasOnly(['name', 'createdAt'])
+    // Optional (Runde 2): type = Ebene (Raum/Schrank/Fach/Box), parent = ID des Behälters, in dem
+    // dieser liegt. Fehlt parent, ist es ein Behälter auf oberster Ebene (auch ohne Raum möglich).
+    // Kreise (A in B, B in A) verhindert die App; hier nur: nicht in sich selbst.
+    function validContainer(d, containerId) {
+      return d.keys().hasOnly(['name', 'createdAt', 'type', 'parent'])
         && validName(d)
-        && (!('createdAt' in d) || d.createdAt is timestamp);
+        && (!('createdAt' in d) || d.createdAt is timestamp)
+        && (!('type' in d) || d.type in ['raum', 'schrank', 'fach', 'box'])
+        && (!('parent' in d) || (d.parent is string && d.parent.size() > 0 && d.parent.size() <= 100
+              && d.parent != containerId && !d.parent.matches('.*[/].*')));
     }
 
     // Fotos: nur JPEG als data-URL (so erzeugt sie die App), max. ~900 KB (Dokumentlimit 1 MiB).
@@ -42,20 +48,28 @@ service cloud.firestore {
         && p.matches('^data:image/jpeg;base64,[A-Za-z0-9+/]+=*$');
     }
 
+    // Mindesthaltbarkeitsdatum (optional) als "YYYY-MM-DD".
+    function validMhd(m) {
+      return m is string && m.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$');
+    }
+
     function validItem(d) {
-      return d.keys().hasOnly(['name', 'qty', 'unit', 'photo', 'updatedAt'])
+      return d.keys().hasOnly(['name', 'qty', 'unit', 'photo', 'mhd', 'updatedAt'])
         && validName(d)
         && d.qty is int && d.qty >= 1 && d.qty <= 100000
-        && d.unit in ['Stk', 'Packung', 'g', 'ml']
+        && d.unit in ['Stk', 'Packung', 'Flasche', 'Dose', 'Glas', 'g', 'kg', 'ml', 'l']
+        && (!('mhd' in d) || validMhd(d.mhd))
         && (!('photo' in d) || validPhoto(d.photo))
         && (!('updatedAt' in d) || d.updatedAt is timestamp);
     }
 
     match /containers/{containerId} {
       allow read: if isMember();
-      allow create: if isMember() && validId(containerId) && validContainer(request.resource.data);
-      allow update: if isMember() && containerId.size() <= 100 && validContainer(request.resource.data);
-      allow delete: if false;
+      allow create: if isMember() && validId(containerId) && validContainer(request.resource.data, containerId);
+      allow update: if isMember() && containerId.size() <= 100 && validContainer(request.resource.data, containerId);
+      // Löschen nur für Mitglieder; "nur wenn leer" prüft die App (Regeln können keine Unterdokumente
+      // zählen). Artikel eines gelöschten Behälters wären weiterhin über den Pfad erreichbar.
+      allow delete: if isMember();
 
       match /items/{itemId} {
         allow read, delete: if isMember();

@@ -147,8 +147,10 @@ describe("firestore.rules", function () {
       await assertFails(outsider.doc("members/mallory@example.com").set({ x: 1 }));
     });
 
-    it("Container löschen ist verboten", async () => {
-      await assertFails(member().doc("containers/keller").delete());
+    it("Container löschen: nur Mitglieder (Runde 2)", async () => {
+      await assertFails(member("mallory@example.com", "mallory").doc("containers/keller").delete());
+      await assertFails(testEnv.unauthenticatedContext().firestore().doc("containers/keller").delete());
+      await assertSucceeds(member().doc("containers/keller").delete());
     });
   });
 
@@ -207,9 +209,11 @@ describe("firestore.rules", function () {
       await assertFails(itemRef(member()).set(withItem({ qty: "2" })));
     });
     it("falsche Einheit abgelehnt, erlaubte Einheiten akzeptiert", async () => {
-      await assertFails(itemRef(member()).set(withItem({ unit: "kg" })));
+      await assertFails(itemRef(member()).set(withItem({ unit: "Tonne" })));
       await assertFails(itemRef(member()).set(withItem({ unit: "stk" })));
-      for (const unit of ["Stk", "Packung", "g", "ml"]) {
+      await assertFails(itemRef(member()).set(withItem({ unit: "L" })));
+      await assertFails(itemRef(member()).set(withItem({ unit: "Stück" })));
+      for (const unit of ["Stk", "Packung", "g", "ml", "kg", "l", "Flasche", "Dose", "Glas"]) {
         await assertSucceeds(itemRef(member()).set(withItem({ unit })));
       }
     });
@@ -353,6 +357,72 @@ describe("firestore.rules", function () {
         const s = await sdb.doc("containers/keller/items/reis").get();
         if (!s.exists) throw new Error("Quelle wurde trotz abgelehntem Batch gelöscht");
       });
+    });
+  });
+  describe("Runde 2: Hierarchie (type, parent)", () => {
+    it("Behälter ohne type/parent bleibt gültig (alte Daten)", async () => {
+      await assertSucceeds(member().doc("containers/neu").set({ name: "Neu" }));
+      await assertSucceeds(member().doc("containers/keller").set({ name: "Keller 2" }, { merge: true }));
+    });
+    it("gültige Typen und parent erlaubt, Ebenen dürfen fehlen", async () => {
+      for (const type of ["raum", "schrank", "fach", "box"]) {
+        await assertSucceeds(member().doc(`containers/t-${type}`).set({ name: type, type }));
+      }
+      await assertSucceeds(member().doc("containers/box-7").set({ name: "Box 7", type: "box", parent: "keller", createdAt: FieldValue.serverTimestamp() }));
+      await assertSucceeds(member().doc("containers/box-8").set({ name: "Box 8", type: "box" }), "Box ohne Raum");
+    });
+    it("unbekannter Typ abgelehnt", async () => {
+      for (const type of ["Raum", "regal", "", 3, null]) {
+        await assertFails(member().doc("containers/neu").set({ name: "Neu", type }));
+      }
+    });
+    it("parent: kein String, leer, zu lang, mit / oder sich selbst abgelehnt", async () => {
+      for (const parent of [5, "", "x".repeat(101), "a/b", null, true]) {
+        await assertFails(member().doc("containers/neu").set({ name: "Neu", parent }));
+      }
+      await assertFails(member().doc("containers/keller").set({ parent: "keller" }, { merge: true }));
+    });
+    it("parent ändern und entfernen (deleteField)", async () => {
+      await assertSucceeds(member().doc("containers/keller").set({ parent: "haus", type: "raum" }, { merge: true }));
+      await assertSucceeds(member().doc("containers/keller").update({ parent: FieldValue.delete() }));
+    });
+    it("Nicht-Mitglied darf parent nicht setzen", async () => {
+      await assertFails(member("mallory@example.com", "mallory").doc("containers/keller").set({ parent: "x" }, { merge: true }));
+    });
+  });
+
+  describe("Runde 2: MHD", () => {
+    const withMhd = (mhd) => ({ name: "Milch", qty: 1, unit: "l", mhd, updatedAt: FieldValue.serverTimestamp() });
+    it("gültiges Datum erlaubt, ohne MHD auch", async () => {
+      await assertSucceeds(member().doc("containers/keller/items/milch").set(withMhd("2027-03-12")));
+      await assertSucceeds(member().doc("containers/keller/items/reis").update({ mhd: "2026-12-31" }));
+      await assertSucceeds(member().doc("containers/keller/items/reis").update({ mhd: FieldValue.delete() }));
+      await assertSucceeds(member().doc("containers/keller/items/reis").update({ qty: 2 }));
+    });
+    it("ungültige Formate abgelehnt", async () => {
+      for (const mhd of ["12.03.2027", "2027-3-12", "2027-13-01", "2027-00-01", "2027-01-32", "1999-01-01", "2027-03-12T00:00", "", 20270312, null]) {
+        await assertFails(member().doc("containers/keller/items/milch").set(withMhd(mhd)), String(mhd));
+      }
+    });
+    it("Nicht-Mitglied darf kein MHD setzen", async () => {
+      await assertFails(member("mallory@example.com", "mallory").doc("containers/keller/items/reis").update({ mhd: "2027-01-01" }));
+    });
+  });
+
+  describe("Runde 2: Umzug (mehrere Artikel per Batch)", () => {
+    it("mehrere Artikel in einem Batch verschieben", async () => {
+      await seed(async (sdb) => {
+        await sdb.doc("containers/keller/items/nudeln").set({ name: "Nudeln", qty: 2, unit: "Packung", mhd: "2027-01-01" });
+        await sdb.doc("containers/garage").set({ name: "Garage" });
+        await sdb.doc("containers/garage/items/reis").set({ name: "Reis", qty: 1, unit: "Packung" });
+      });
+      const db = member();
+      const batch = db.batch();
+      batch.update(db.doc("containers/garage/items/reis"), { qty: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp() });
+      batch.delete(db.doc("containers/keller/items/reis"));
+      batch.set(db.doc("containers/garage/items/nudeln"), { name: "Nudeln", qty: 2, unit: "Packung", mhd: "2027-01-01", updatedAt: FieldValue.serverTimestamp() });
+      batch.delete(db.doc("containers/keller/items/nudeln"));
+      await assertSucceeds(batch.commit());
     });
   });
 });
