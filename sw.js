@@ -1,19 +1,24 @@
 // App-Dateien: network-first – immer zuerst die aktuelle Version vom Server holen, Cache nur als
 // Offline-Fallback. (Früher cache-first – dadurch kamen neue app.js-Versionen nie an.)
-// Firebase-Bibliotheken (feste Version in der URL, ändern sich nie): cache-first – schneller Start
-// und die App öffnet sich auch ohne Netz (Daten kommen dann aus dem Firestore-Offline-Speicher).
-const CACHE = "vorrat-shell-v3";
-const LIB_CACHE = "vorrat-libs-v1";
+// Firebase-Bibliotheken (selbst gehostet unter vendor/, feste Version im Pfad, ändern sich nie):
+// cache-first – schneller Start und die App öffnet sich auch ohne Netz (Daten kommen dann aus dem
+// Firestore-Offline-Speicher). Neue Firebase-Version = neuer Ordnername (siehe vendor/…/README.txt).
+const CACHE = "vorrat-shell-v4";
+const LIB_CACHE = "vorrat-libs-v2";
+const FIREBASE_DIR = "vendor/firebase-10.14.1/";
+const LIBS = ["firebase-app.js", "firebase-firestore.js", "firebase-auth.js"].map((f) => FIREBASE_DIR + f);
 const SHELL = [
-  "./", "index.html", "app.js", "lib.js", "firebase-config.js", "register-sw.js", "style.css",
+  "./", "index.html", "app.js", "lib.js", "ocr.js", "firebase-config.js", "register-sw.js", "style.css",
   "manifest.json", "icon.svg", "qr.html", "qr.js", "vendor/qrcode-generator-1.4.4.js",
 ];
-const FIREBASE_PREFIX = "https://www.gstatic.com/firebasejs/10.14.1/";
+const FIREBASE_PREFIX = new URL(FIREBASE_DIR, self.location.href).href;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE)
-      .then((cache) => cache.addAll(SHELL))
+    Promise.all([
+      caches.open(CACHE).then((cache) => cache.addAll(SHELL)),
+      caches.open(LIB_CACHE).then((cache) => cache.addAll(LIBS)),
+    ])
       .catch(() => {}) // Vorab-Cache ist nur ein Bonus; Installation nicht daran scheitern lassen
       .then(() => self.skipWaiting())
   );
@@ -41,7 +46,7 @@ self.addEventListener("fetch", (event) => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
 
-  if (url.href.startsWith(FIREBASE_PREFIX)) {
+  if (url.href.startsWith(FIREBASE_PREFIX) && !url.search) {
     event.respondWith(
       caches.open(LIB_CACHE).then(async (cache) => {
         const hit = await cache.match(req);
@@ -54,7 +59,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (url.origin !== location.origin) return; // Firestore, Freistellungs-Modell usw. nicht anfassen
+  if (url.origin !== location.origin) return; // Firestore, Freistellung, Texterkennung usw. nicht anfassen
 
   const key = shellKey(req.url);
   event.respondWith(

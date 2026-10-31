@@ -4,22 +4,26 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <!--
-  Content-Security-Policy: erlaubt Skripte nur von hier, Firebase (gstatic/google) und der
-  Freistellungs-Bibliothek (jsdelivr/staticimgly, braucht WebAssembly und 'unsafe-eval' – ohne das
-  schlägt die Freistellung mit EvalError fehl, getestet mit tests/e2e/csp-cutout.mjs). Eingeschleuste
-  Inline-Skripte und onerror=-Handler würden weiterhin blockiert. Falls nach einem Update etwas nicht mehr geht: Browser-Konsole zeigt
-  "Refused to …" mit der blockierten Adresse.
+  Content-Security-Policy: Skripte nur von hier (auch Firebase, selbst gehostet unter vendor/) und
+  von cdn.jsdelivr.net/staticimgly.com (Freistellung und – Experiment – Texterkennung, beide erst
+  bei Bedarf geladen; brauchen WebAssembly und für die Freistellung 'unsafe-eval' – ohne das schlägt
+  sie mit EvalError fehl, getestet mit tests/e2e/csp-cutout.mjs und csp-ocr.mjs). Eingeschleuste
+  Inline-Skripte und onerror=-Handler bleiben blockiert.
+  App Check (firebase-config.js → appCheckSiteKey) braucht zusätzlich in script-src
+  "https://www.google.com https://www.gstatic.com" – siehe STAND.md.
+  Falls nach einem Update etwas nicht mehr geht: Browser-Konsole zeigt "Refused to …" mit der
+  blockierten Adresse.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://www.google.com https://cdn.jsdelivr.net https://staticimgly.com 'wasm-unsafe-eval' 'unsafe-eval' blob:; connect-src 'self' https://*.googleapis.com https://www.google.com https://*.firebaseapp.com https://cdn.jsdelivr.net https://staticimgly.com data: blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; frame-src https://*.firebaseapp.com https://www.google.com https://recaptcha.google.com; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://staticimgly.com 'wasm-unsafe-eval' 'unsafe-eval' blob:; connect-src 'self' https://*.googleapis.com https://www.google.com https://*.firebaseapp.com https://cdn.jsdelivr.net https://staticimgly.com data: blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; frame-src https://*.firebaseapp.com https://www.google.com https://recaptcha.google.com; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'" />
 <title>Vorrat</title>
 <meta name="theme-color" content="#2f6f4f" />
 <link rel="manifest" href="manifest.json" />
 <link rel="icon" href="icon.svg" />
 <link rel="apple-touch-icon" href="icon.svg" />
 <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin />
-<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js" />
-<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js" />
-<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js" />
+<link rel="modulepreload" href="vendor/firebase-10.14.1/firebase-app.js" />
+<link rel="modulepreload" href="vendor/firebase-10.14.1/firebase-firestore.js" />
+<link rel="modulepreload" href="vendor/firebase-10.14.1/firebase-auth.js" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-title" content="Vorrat" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -35,6 +39,12 @@
 <main id="app">
   <p class="empty-hint">Lade…</p>
 </main>
+<nav class="bottom-nav" id="bottom-nav" aria-label="Navigation" hidden>
+  <a href="index.html" data-nav="home"><span aria-hidden="true">🏠</span>Übersicht</a>
+  <button type="button" data-nav="search"><span aria-hidden="true">🔍</span>Suchen</button>
+  <button type="button" data-nav="scan"><span aria-hidden="true">📷</span>Scannen</button>
+  <button type="button" data-nav="recent"><span aria-hidden="true">🕘</span>Zuletzt</button>
+</nav>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script type="module" src="app.js"></script>
 <script src="register-sw.js"></script>

@@ -15,11 +15,13 @@ const { test, run } = createRunner();
 
 // Öffnet eine Seite in einem frischen Kontext mit Startdaten. Gibt Helfer zurück; `done()` prüft
 // am Ende, dass keine verbotenen Anfragen, Seitenfehler oder CSP-Verletzungen auftraten.
-async function open(pathAndQuery, { seed = {}, viewport, isMobile = false, hasTouch = false } = {}) {
+async function open(pathAndQuery, { seed = {}, viewport, isMobile = false, hasTouch = false, routes = [], init = null } = {}) {
   const context = await browser.newContext({ serviceWorkers: "block", viewport: viewport || { width: 1000, height: 800 }, isMobile, hasTouch, locale: "de-CH" });
   const net = await guardNetwork(context, server.url);
   const log = await watchPage(context);
+  for (const [pattern, handler] of routes) await context.route(pattern, handler); // nach guardNetwork = Vorrang
   await context.addInitScript((s) => { window.__seed = s; }, seed);
+  if (init) await context.addInitScript(init);
   const page = await context.newPage();
   const dialogs = [];
   page.on("dialog", (d) => {
@@ -76,20 +78,22 @@ test("1 Übersicht: Behälter alphabetisch, Suche 'milch', Link + Hervorhebung",
   assertEqual(names, ["apfelregal", "Kühlschrank", "Ölschrank", "Zebra-Kiste"], "Behälter-Reihenfolge");
 
   await page.fill("#search", "milch");
-  await page.waitForSelector("#search-results a.card.result");
-  const results = await page.locator("#search-results a.card.result").evaluateAll((as) =>
+  await page.waitForSelector("#search-results a.card.result:not([data-cid])");
+  const results = await page.locator("#search-results a.card.result:not([data-cid])").evaluateAll((as) =>
     as.map((a) => ({ name: a.querySelector("strong").textContent, where: a.querySelector("small b").textContent, href: a.getAttribute("href") })));
   assertEqual(results.map((r) => r.name), ["Milch", "Hafermilch"], "Suchtreffer (Wortanfang zuerst)");
   assertEqual(results[0].where, "Kühlschrank", "Behältername im Treffer");
   assertEqual(results[0].href, "index.html?c=k%C3%BChlschrank#i=milch", "Link des Treffers");
 
   // Umlaut-/Grossschreibung-tolerant und über den Behälternamen
+  // (Runde 2: zusätzlich der Behälter selbst als Treffer)
   await page.fill("#search", "KUEHLSCHRANK");
-  await waitUntil(page, () => document.querySelectorAll("#search-results a.card.result").length === 1);
+  await waitUntil(page, () => document.querySelectorAll("#search-results a.card.result:not([data-cid])").length === 1
+    && document.querySelectorAll("#search-results a.card.result[data-cid]").length === 1);
 
   await page.fill("#search", "milch");
-  await page.waitForSelector("#search-results a.card.result");
-  await page.click("#search-results a.card.result >> nth=0");
+  await page.waitForSelector("#search-results a.card.result:not([data-cid])");
+  await page.click("#search-results a.card.result:not([data-cid]) >> nth=0");
   await page.waitForURL(/index\.html\?c=k%C3%BChlschrank#i=milch$/);
   await page.waitForSelector('#items .card[data-id="milch"].highlight', { timeout: 3000 });
   assertEqual(await page.textContent("#container-title"), "Kühlschrank", "Titel der Behälter-Ansicht");
@@ -372,6 +376,315 @@ test("7 Mobil 360×740: keine horizontale Scrollbar, +/− mind. 44px", async ()
   for (const b of m.btns) assert(b.w >= 44 && b.h >= 44, `+/− Knopf zu klein: ${b.w}×${b.h}`);
   await page.locator('[data-action="inc"]').first().tap();
   await waitUntil(page, () => document.querySelector('#items .card[data-id="a"] .qty-value').textContent === "12346");
+  await t.done();
+});
+
+// ---------------------------------- Runde 2 ----------------------------------
+
+function strip(doc) {
+  if (!doc) return doc;
+  const { updatedAt, createdAt, ...rest } = doc;
+  void updatedAt; void createdAt;
+  return rest;
+}
+
+const HOUSE = {
+  "containers/kueche": { name: "Küche", type: "raum" },
+  "containers/kuehlschrank": { name: "Kühlschrank", type: "schrank", parent: "kueche" },
+  "containers/gemuesefach": { name: "Gemüsefach", type: "fach", parent: "kuehlschrank" },
+  "containers/fach-1": { name: "Fach 1", type: "fach", parent: "keller" },
+  "containers/keller": { name: "Keller" },
+  "containers/lose-box": { name: "Lose Box", type: "box" },
+  "containers/gemuesefach/items/karotten": { name: "Karotten", qty: 3, unit: "Stk" },
+  "containers/kueche/items/salz": { name: "Salz", qty: 1, unit: "Packung" },
+};
+
+test("10 Einheiten und Schrittweite ±50 bei g/ml", async () => {
+  const t = await open("index.html?c=vorrat", {
+    seed: {
+      "containers/vorrat": { name: "Vorrat" },
+      "containers/vorrat/items/mehl": { name: "Mehl", qty: 500, unit: "g" },
+      "containers/vorrat/items/rest": { name: "Rest", qty: 30, unit: "ml" },
+      "containers/vorrat/items/wasser": { name: "Wasser", qty: 2, unit: "l" },
+    },
+  });
+  const { page } = t;
+  await page.waitForSelector('#items .card[data-id="mehl"]');
+  const units = await page.locator('#add-item-form select[name="unit"] option').allTextContents();
+  assertEqual(units, ["Stk", "Packung", "Flasche", "Dose", "Glas", "g", "kg", "ml", "l"], "Einheiten im Formular");
+  assertEqual(await card(page, "mehl").locator('[data-action="inc"]').getAttribute("aria-label"), "50 mehr", "aria-label");
+
+  await card(page, "mehl").locator('[data-action="inc"]').click();
+  await waitUntil(page, () => document.querySelector('#items .card[data-id="mehl"] .qty-value').textContent === "550");
+  await card(page, "wasser").locator('[data-action="dec"]').click();
+  await waitUntil(page, () => document.querySelector('#items .card[data-id="wasser"] .qty-value').textContent === "1");
+  let w = await t.writes();
+  assertEqual(w.map((x) => x.data && x.data.qty), [{ __op: "increment", by: 50 }, { __op: "increment", by: -1 }], "increment 50 bzw. 1");
+
+  // 30 ml − 50 → entfernen (mit Rückgängig)
+  await card(page, "rest").locator('[data-action="dec"]').click();
+  await card(page, "rest").waitFor({ state: "detached" });
+  await page.locator("#toast.show button", { hasText: "Rückgängig" }).click();
+  await card(page, "rest").waitFor();
+  assertEqual(strip((await t.db())["containers/vorrat/items/rest"]), { name: "Rest", qty: 30, unit: "ml" }, "wiederhergestellt");
+
+  // neue Einheit anlegen
+  await page.fill('#add-item-form input[name="name"]', "Olivenöl");
+  await page.selectOption('#add-item-form select[name="unit"]', "Flasche");
+  await page.click('#add-item-form button[type="submit"]');
+  await card(page, "olivenöl").waitFor();
+  assertEqual((await t.db())["containers/vorrat/items/olivenöl"].unit, "Flasche", "Flasche gespeichert");
+  await t.done();
+});
+
+test("11 Hierarchie: oberste Ebene, Pfad, Unterbehälter, Suche mit Pfad, liegt-in ändern", async () => {
+  const t = await open("index.html", { seed: HOUSE });
+  const { page } = t;
+  await page.waitForSelector("#container-list a.card");
+  assertEqual(await page.locator("#container-list a.card strong").allTextContents(), ["Keller", "Küche", "Lose Box"], "nur oberste Ebene");
+  assert((await page.locator('#container-list a.card[data-cid="kueche"] small').textContent()).includes("Raum · 1 darin"), "Typ und Anzahl darin");
+
+  await page.fill("#search", "karotten");
+  await page.waitForSelector("#search-results a.card.result:not([data-cid])");
+  assertEqual(await page.locator("#search-results a.card.result:not([data-cid]) small b").first().textContent(), "Küche › Kühlschrank › Gemüsefach", "voller Pfad im Treffer");
+  await page.fill("#search", "küche salz");
+  await waitUntil(page, () => document.querySelectorAll("#search-results a.card.result:not([data-cid])").length === 1);
+  await page.fill("#search", "gemüsefach");
+  await page.waitForSelector('#search-results a.card.result[data-cid="gemuesefach"]');
+
+  // Kühlschrank: Pfad oben, Unterbehälter
+  await page.goto(server.url + "index.html?c=kuehlschrank");
+  await page.waitForSelector('#children a.card[data-cid="gemuesefach"]');
+  assertEqual((await page.textContent("#breadcrumb")).trim(), "Küche", "Breadcrumb");
+  assertEqual(await page.textContent("#container-type"), "Schrank", "Typ");
+  assertEqual(await page.getAttribute("#breadcrumb a", "href"), "index.html?c=kueche", "Breadcrumb-Link");
+
+  // Unterbehälter anlegen: "Fach 1" gibt es schon im Keller → eigene ID
+  await page.click(".sub-form summary");
+  await page.fill('#new-child-form input[name="name"]', "Fach 1");
+  await page.selectOption('#new-child-form select[name="type"]', "fach");
+  await page.click('#new-child-form button[type="submit"]');
+  await page.waitForSelector('#children a.card[data-cid="kuehlschrank-fach-1"]');
+  assertEqual(strip((await t.db())["containers/kuehlschrank-fach-1"]), { name: "Fach 1", parent: "kuehlschrank", type: "fach" }, "neuer Unterbehälter");
+  assertEqual(strip((await t.db())["containers/fach-1"]), { name: "Fach 1", type: "fach", parent: "keller" }, "bestehender unverändert");
+
+  // Einstellungen: Ziele ohne sich selbst und eigene Unterbehälter (kein Kreis)
+  await page.click("#edit-btn");
+  const opts = await page.locator("#cs-parent option").evaluateAll((os) => os.map((o) => o.value));
+  assert(!opts.includes("kuehlschrank") && !opts.includes("gemuesefach") && !opts.includes("kuehlschrank-fach-1"), `Kreis-Ziele angeboten: ${opts}`);
+  assert(opts.includes("") && opts.includes("lose-box") && opts.includes("kueche"), `Ziele: ${opts}`);
+  assertEqual(await page.inputValue("#cs-parent"), "kueche", "aktueller Elternteil vorausgewählt");
+  // In die lose Box legen und umbenennen
+  await page.fill("#cs-name", "Kühlschrank gross");
+  await page.selectOption("#cs-parent", "lose-box");
+  await page.click('.photo-dialog [data-action="save"]');
+  await waitUntil(page, () => document.querySelector("#breadcrumb").textContent.trim() === "Lose Box");
+  assertEqual(strip((await t.db())["containers/kuehlschrank"]), { name: "Kühlschrank gross", type: "schrank", parent: "lose-box" }, "gespeichert");
+  // Oberste Ebene, Typ entfernen → Felder gelöscht
+  await page.click("#edit-btn");
+  await page.selectOption("#cs-parent", "");
+  await page.selectOption("#cs-type", "");
+  await page.click('.photo-dialog [data-action="save"]');
+  await waitUntil(page, () => document.querySelector("#breadcrumb").hidden);
+  assertEqual(strip((await t.db())["containers/kuehlschrank"]), { name: "Kühlschrank gross" }, "parent/type entfernt");
+  await t.done();
+});
+
+test("12 Behälter löschen nur wenn leer, mit Rückgängig", async () => {
+  const t = await open("index.html?c=kuehlschrank", { seed: HOUSE });
+  const { page } = t;
+  await page.waitForSelector('#children a.card[data-cid="gemuesefach"]');
+  await page.click("#edit-btn");
+  await page.click('.photo-dialog [data-action="delete"]');
+  await waitUntil(page, () => document.querySelector("#cs-hint").textContent.includes("Gemüsefach"));
+  await page.click('.photo-dialog [data-action="close"]');
+
+  await page.goto(server.url + "index.html?c=gemuesefach");
+  await page.waitForSelector('#items .card[data-id="karotten"]');
+  await page.click("#edit-btn");
+  await page.click('.photo-dialog [data-action="delete"]');
+  await waitUntil(page, () => document.querySelector("#cs-hint").textContent.includes("1 Artikel"));
+  await page.click('.photo-dialog [data-action="close"]');
+  assert(!(await t.writes()).some((x) => x.op === "delete"), "nichts gelöscht");
+
+  // leeren und löschen
+  await card(page, "karotten").locator('[data-action="del"]').click();
+  await card(page, "karotten").waitFor({ state: "detached" });
+  await page.click("#edit-btn");
+  await page.click('.photo-dialog [data-action="delete"]');
+  await page.waitForSelector("#undo-delete");
+  assert(!("containers/gemuesefach" in (await t.db())), "Behälter gelöscht");
+  await page.waitForTimeout(200);
+  assert(!("containers/gemuesefach" in (await t.db())), "nicht automatisch wieder angelegt");
+  await page.click("#undo-delete");
+  await page.waitForURL(/\?c=gemuesefach$/);
+  await page.waitForSelector("#breadcrumb a");
+  assertEqual(strip((await t.db())["containers/gemuesefach"]), { name: "Gemüsefach", type: "fach", parent: "kuehlschrank" }, "wiederhergestellt mit Typ und Ort");
+  await t.done();
+});
+
+test("13 Navigation unten und 'zuletzt geöffnet' (Handy 360 px)", async () => {
+  const t = await open("index.html?c=keller", { seed: HOUSE, viewport: { width: 360, height: 740 }, isMobile: true, hasTouch: true });
+  const { page } = t;
+  await page.waitForSelector("#bottom-nav:not([hidden])");
+  await waitUntil(page, () => document.getElementById("container-title").textContent === "Keller");
+  await page.goto(server.url + "index.html?c=gemuesefach");
+  await page.waitForSelector('#items .card[data-id="karotten"]');
+  const m = await page.evaluate(() => {
+    const de = document.documentElement;
+    const nav = [...document.querySelectorAll("#bottom-nav a, #bottom-nav button")].map((b) => b.getBoundingClientRect()).map((r) => ({ w: r.width, h: r.height }));
+    return { scroll: de.scrollWidth, client: de.clientWidth, nav };
+  });
+  assert(m.scroll <= m.client, `horizontale Scrollbar ${m.scroll} > ${m.client}`);
+  assertEqual(m.nav.length, 4, "4 Einträge");
+  for (const b of m.nav) assert(b.w >= 44 && b.h >= 44, `Nav-Knopf zu klein: ${b.w}×${b.h}`);
+
+  await page.locator('#bottom-nav [data-nav="recent"]').tap();
+  await page.waitForSelector(".recent-list a.card");
+  assertEqual(await page.locator(".recent-list a.card strong").allTextContents(), ["Küche › Kühlschrank › Gemüsefach", "Keller"], "zuletzt geöffnet, neuestes zuerst, mit Pfad");
+  await page.click('.photo-dialog [data-action="close"]');
+
+  await page.locator('#bottom-nav [data-nav="search"]').tap();
+  await page.waitForURL(/index\.html$/);
+  await waitUntil(page, () => document.activeElement && document.activeElement.id === "search");
+  assertEqual(await page.locator("#recent .chip").allTextContents(), ["Gemüsefach", "Keller"], "Chips in der Übersicht");
+  await page.locator('#bottom-nav [data-nav="scan"]').tap();
+  await waitUntil(page, () => document.getElementById("toast").classList.contains("show"));
+  await t.done();
+});
+
+test("14 Umzugsmodus: mehrere Artikel auf einmal verschieben, Rückgängig", async () => {
+  const t = await open("index.html?c=keller", {
+    seed: {
+      "containers/keller": { name: "Keller" },
+      "containers/garage": { name: "Garage" },
+      "containers/keller/items/nudeln": { name: "Nudeln", qty: 3, unit: "Packung", mhd: "2027-01-01" },
+      "containers/keller/items/reis": { name: "Reis", qty: 2, unit: "Packung", photo: PHOTO },
+      "containers/keller/items/mehl": { name: "Mehl", qty: 1, unit: "g" },
+      "containers/keller/items/zucker": { name: "Zucker", qty: 1, unit: "Packung" },
+      "containers/garage/items/reis": { name: "Reis", qty: 4, unit: "Packung" },
+      "containers/garage/items/mehl": { name: "Mehl", qty: 1, unit: "kg" },
+    },
+  });
+  const { page } = t;
+  await page.waitForSelector('#items .card[data-id="nudeln"]');
+  await page.click("#select-btn");
+  await page.waitForSelector("#select-bar:not([hidden])");
+  for (const id of ["nudeln", "reis", "mehl"]) await page.click(`#items .select-card[data-id="${id}"]`);
+  assertEqual(await page.textContent("#select-count"), "3 ausgewählt", "Zähler");
+  page.__nextDialog = () => "accept"; // alert wegen Mehl (andere Einheit im Ziel)
+  await page.click("#select-move");
+  await page.waitForSelector('.photo-dialog [data-action="ok"]:not([disabled])');
+  assertEqual(await page.textContent(".photo-dialog strong"), "3 Artikel", "Dialogtitel");
+  await page.selectOption("#move-target", "garage");
+  await page.click('.photo-dialog [data-action="ok"]');
+  await card(page, "nudeln").waitFor({ state: "detached" });
+  assert(t.dialogs.some((d) => d.type === "alert" && d.message.includes("Mehl")), "Hinweis zu Mehl");
+  const w = await t.writes();
+  assertEqual(w.map((x) => `${x.op} ${x.path}`), [
+    "batch.set containers/garage/items/nudeln", "batch.delete containers/keller/items/nudeln",
+    "batch.update containers/garage/items/reis", "batch.delete containers/keller/items/reis",
+  ], "ein Batch, Mehl übersprungen");
+  let db = await t.db();
+  assertEqual(strip(db["containers/garage/items/nudeln"]), { name: "Nudeln", qty: 3, unit: "Packung", mhd: "2027-01-01" }, "MHD mitgenommen");
+  assertEqual({ qty: db["containers/garage/items/reis"].qty, photo: db["containers/garage/items/reis"].photo === PHOTO }, { qty: 6, photo: true }, "addiert, Foto übernommen");
+  assert(db["containers/keller/items/mehl"], "Mehl bleibt");
+  assert(await page.isHidden("#select-bar"), "Auswahlmodus beendet");
+
+  await page.locator("#toast.show button", { hasText: "Rückgängig" }).click();
+  await card(page, "nudeln").waitFor();
+  await card(page, "reis").waitFor();
+  db = await t.db();
+  assert(!db["containers/garage/items/nudeln"], "im Ziel wieder weg");
+  assertEqual({ qty: db["containers/garage/items/reis"].qty, photo: "photo" in db["containers/garage/items/reis"] }, { qty: 4, photo: false }, "Ziel wie vorher");
+  assertEqual(strip(db["containers/keller/items/reis"]), { name: "Reis", qty: 2, unit: "Packung", photo: PHOTO }, "Quelle wie vorher");
+  assertEqual(strip(db["containers/keller/items/nudeln"]), { name: "Nudeln", qty: 3, unit: "Packung", mhd: "2027-01-01" }, "Quelle mit MHD");
+  await t.done();
+});
+
+const FAKE_OCR = `export async function recognizeText(canvas, onProgress) { onProgress(1); return "MHD l2.O3.27  L4711"; }`;
+
+test("15 MHD: Schnellwahl, Markierung, entfernen, Kamera (OCR-Fake und GS1-Fake) mit Bestätigung", async () => {
+  const ocrRequests = [];
+  const t = await open("index.html?c=kuehlschrank", {
+    seed: {
+      "containers/kuehlschrank": { name: "Kühlschrank" },
+      "containers/kuehlschrank/items/milch": { name: "Milch", qty: 1, unit: "l" },
+      "containers/kuehlschrank/items/joghurt": { name: "Joghurt", qty: 2, unit: "Stk", mhd: "2020-01-01" },
+      "containers/kuehlschrank/items/kaese": { name: "Käse", qty: 1, unit: "Stk" },
+    },
+    routes: [["**/ocr.js", (route) => { ocrRequests.push(route.request().url()); return route.fulfill({ status: 200, contentType: "text/javascript", body: FAKE_OCR }); }]],
+  });
+  const { page } = t;
+  await page.waitForSelector('#items .card[data-id="milch"]');
+  assertEqual(ocrRequests, [], "Texterkennung wird beim Start nicht geladen");
+  assert(await card(page, "joghurt").locator(".mhd-expired").count() === 1, "abgelaufen markiert");
+  assertEqual(await card(page, "milch").locator(".mhd").count(), 0, "ohne MHD keine Markierung");
+
+  const expected = await page.evaluate(() => { const d = new Date(); d.setDate(d.getDate() + 3); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; });
+  await card(page, "milch").locator('[data-action="details"]').click();
+  await page.click('.photo-dialog [data-action="mhd"]');
+  await page.click('.photo-dialog [data-add="3"]');
+  await card(page, "milch").locator(".mhd-soon").waitFor();
+  let w = await t.writes();
+  assertEqual({ op: w[0].op, keys: w[0].keys.sort(), mhd: w[0].data.mhd }, { op: "update", keys: ["mhd", "updatedAt"], mhd: expected }, "nur mhd geschrieben");
+
+  // Kalender
+  await card(page, "milch").locator('[data-action="details"]').click();
+  await page.click('.photo-dialog [data-action="mhd"]');
+  await page.fill("#mhd-date", "2030-05-17");
+  await page.click('.photo-dialog [data-action="date"]');
+  await waitUntil(page, () => document.querySelector('#items .card[data-id="milch"] .mhd-ok')?.textContent === "MHD 17.05.2030");
+
+  // Entfernen
+  await card(page, "joghurt").locator('[data-action="details"]').click();
+  await page.click('.photo-dialog [data-action="mhd"]');
+  await page.click('.photo-dialog [data-action="clear"]');
+  await waitUntil(page, () => !document.querySelector('#items .card[data-id="joghurt"] .mhd'));
+  assert(!("mhd" in (await t.db())["containers/kuehlschrank/items/joghurt"]), "Feld entfernt");
+
+  // Kamera → OCR (Fake) → Vorschlag muss bestätigt werden
+  const jpeg = Buffer.from(PHOTO.split(",")[1], "base64");
+  await card(page, "kaese").locator('[data-action="details"]').click();
+  await page.click('.photo-dialog [data-action="mhd"]');
+  const chooser = page.waitForEvent("filechooser");
+  await page.click('.photo-dialog [data-action="camera"]');
+  await (await chooser).setFiles({ name: "etikett.jpg", mimeType: "image/jpeg", buffer: jpeg });
+  await page.waitForSelector('.photo-dialog [data-date="2027-03-12"]');
+  assertEqual(ocrRequests.length, 1, "ocr.js erst jetzt geladen");
+  assert(!("mhd" in (await t.db())["containers/kuehlschrank/items/kaese"]), "ohne Bestätigung nichts gespeichert");
+  assert((await page.textContent(".photo-dialog .ocr-text")).includes("MHD"), "gelesener Text angezeigt");
+  await page.click('.photo-dialog [data-date="2027-03-12"]');
+  await waitUntil(page, () => document.querySelector('#items .card[data-id="kaese"] .mhd')?.textContent === "MHD 12.03.2027");
+  await t.done();
+});
+
+test("16 MHD aus GS1-DataMatrix (BarcodeDetector-Fake, AI 17)", async () => {
+  const t = await open("index.html?c=kuehlschrank", {
+    seed: {
+      "containers/kuehlschrank": { name: "Kühlschrank" },
+      "containers/kuehlschrank/items/kaese": { name: "Käse", qty: 1, unit: "Stk" },
+    },
+    routes: [["**/ocr.js", (route) => route.abort()]],
+    init: () => {
+      window.BarcodeDetector = class {
+        static async getSupportedFormats() { return ["qr_code", "data_matrix"]; }
+        constructor(opts) { this.formats = opts.formats; }
+        async detect() { return [{ rawValue: "]d2010401234567890317281130\u001d10LOT7" }]; }
+      };
+    },
+  });
+  const { page } = t;
+  await page.waitForSelector('#items .card[data-id="kaese"]');
+  await card(page, "kaese").locator('[data-action="details"]').click();
+  await page.click('.photo-dialog [data-action="mhd"]');
+  const chooser = page.waitForEvent("filechooser");
+  await page.click('.photo-dialog [data-action="camera"]');
+  await (await chooser).setFiles({ name: "code.jpg", mimeType: "image/jpeg", buffer: Buffer.from(PHOTO.split(",")[1], "base64") });
+  await page.waitForSelector('.photo-dialog [data-date="2028-11-30"]');
+  assert((await page.textContent(".photo-dialog")).includes("aus dem Code"), "Quelle Code");
+  await page.click('.photo-dialog [data-date="2028-11-30"]');
+  await waitUntil(page, () => document.querySelector('#items .card[data-id="kaese"] .mhd')?.textContent === "MHD 30.11.2028");
   await t.done();
 });
 

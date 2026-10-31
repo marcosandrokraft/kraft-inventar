@@ -43,12 +43,13 @@ export async function launchBrowser() {
   throw new Error(`Kein Browser gefunden (E2E_BROWSER_PATH setzen):\n${errors.join("\n")}`);
 }
 
-const FIREBASE_PREFIX = "https://www.gstatic.com/firebasejs/10.14.1/";
+// Firebase ist selbst gehostet (vendor/firebase-10.14.1/); die Tests ersetzen genau diese Dateien.
+const FIREBASE_DIR = "/vendor/firebase-10.14.1/";
 const FAKES = ["firebase-app.js", "firebase-firestore.js", "firebase-auth.js"];
 
 // Alle Netzwerkanfragen eines Kontexts kontrollieren:
+// - Firebase-SDK unter vendor/ → Fake-Module aus tests/e2e/fake-firebase/
 // - eigener Server → durchlassen
-// - Firebase-SDK von gstatic → Fake-Module aus tests/e2e/fake-firebase/
 // - alles andere → blockieren und in `blocked` protokollieren (Google/Firebase gilt als Fehler)
 export async function guardNetwork(context, baseUrl) {
   const fakeSource = {};
@@ -58,26 +59,24 @@ export async function guardNetwork(context, baseUrl) {
   const origin = new URL(baseUrl).origin;
   await context.route("**/*", async (route) => {
     const url = route.request().url();
+    if (url.startsWith(origin + FIREBASE_DIR)) {
+      const name = url.slice((origin + FIREBASE_DIR).length).split("?")[0];
+      if (fakeSource[name]) {
+        return route.fulfill({ status: 200, contentType: "text/javascript; charset=utf-8", body: fakeSource[name] });
+      }
+      blocked.push(url); // z.B. app-check: in den Tests nie erwartet
+      return route.abort("blockedbyclient");
+    }
     if (url.startsWith(origin + "/") || url === origin || url.startsWith("data:") || url.startsWith("blob:")) {
       return route.continue();
     }
     external.push(url);
-    if (url.startsWith(FIREBASE_PREFIX)) {
-      const name = url.slice(FIREBASE_PREFIX.length).split("?")[0];
-      if (fakeSource[name]) {
-        return route.fulfill({
-          status: 200,
-          contentType: "text/javascript; charset=utf-8",
-          headers: { "Access-Control-Allow-Origin": "*" },
-          body: fakeSource[name],
-        });
-      }
-    }
     blocked.push(url);
     return route.abort("blockedbyclient");
   });
   // Echte Firebase-/Google-Backends: dürfen nie angefragt werden.
-  const forbidden = () => blocked.filter((u) => /(^https?:\/\/[^/]*\.(googleapis\.com|firebaseapp\.com|firebaseio\.com)\b)|google\.com\//.test(u));
+  // gstatic.com: Firebase kommt nicht mehr von dort (selbst gehostet) – jede Anfrage dorthin ist ein Fehler.
+  const forbidden = () => blocked.filter((u) => /(^https?:\/\/[^/]*\.(googleapis\.com|firebaseapp\.com|firebaseio\.com|gstatic\.com)\b)|google\.com\/|vendor\/firebase/.test(u));
   return { blocked, external, forbidden };
 }
 

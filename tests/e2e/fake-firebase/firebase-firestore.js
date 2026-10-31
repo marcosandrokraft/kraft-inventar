@@ -1,4 +1,4 @@
-// In-Memory-Ersatz für https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js
+// In-Memory-Ersatz für vendor/firebase-10.14.1/firebase-firestore.js
 // (nur für die Browser-Smoke-Tests in tests/e2e/). Wird per page.route() statt der echten Datei
 // ausgeliefert – es gibt also KEINE Verbindung zu Firebase.
 //

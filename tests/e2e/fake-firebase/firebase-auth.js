@@ -1,4 +1,4 @@
-// Ersatz für https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js (nur tests/e2e/).
+// Ersatz für vendor/firebase-10.14.1/firebase-auth.js (nur tests/e2e/).
 // Standard: angemeldet als Platzhalter-Benutzer. window.__fakeSignedOut = true → abgemeldet.
 const user = window.__fakeSignedOut
   ? null

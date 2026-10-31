@@ -1,5 +1,5 @@
 import * as config from "./firebase-config.js";
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import { initializeApp } from "./vendor/firebase-10.14.1/firebase-app.js";
 import {
   initializeFirestore,
   getFirestore,
@@ -16,12 +16,13 @@ import {
   onSnapshot,
   serverTimestamp,
   increment,
+  deleteField,
   writeBatch,
   terminate,
   clearIndexedDbPersistence,
   query,
   orderBy,
-} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+} from "./vendor/firebase-10.14.1/firebase-firestore.js";
 import {
   getAuth,
   onAuthStateChanged,
@@ -29,7 +30,7 @@ import {
   isSignInWithEmailLink,
   signInWithEmailLink,
   signOut,
-} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+} from "./vendor/firebase-10.14.1/firebase-auth.js";
 import {
   UNITS,
   MAX_NAME,
@@ -45,6 +46,23 @@ import {
   containerIdFromScan,
   containerUrl,
   findObjectBounds,
+  planStep,
+  qtyStep,
+  CONTAINER_TYPES,
+  containerPath,
+  formatPath,
+  isTopLevel,
+  childContainers,
+  wouldCreateCycle,
+  parentOptions,
+  uniqueContainerId,
+  isoDate,
+  isValidIsoDate,
+  addToDate,
+  mhdStatus,
+  formatDate,
+  parseDatesFromText,
+  parseGs1Expiry,
 } from "./lib.js";
 
 // Freistellungs-Bibliothek wird erst beim ersten Foto geladen. Als statischer Import würde ein
@@ -66,7 +84,7 @@ const app = initializeApp(config.firebaseConfig);
 if (config.appCheckSiteKey) {
   try {
     const { initializeAppCheck, ReCaptchaV3Provider } = await import(
-      "https://www.gstatic.com/firebasejs/10.14.1/firebase-app-check.js"
+      "./vendor/firebase-10.14.1/firebase-app-check.js"
     );
     initializeAppCheck(app, {
       provider: new ReCaptchaV3Provider(config.appCheckSiteKey),
@@ -110,19 +128,20 @@ function showError(el, err) {
   el.innerHTML = `<p class="empty-hint">Fehler: <strong>${escapeHtml(err.code || "unbekannt")}</strong>${hint}<br><small>${escapeHtml(err.message || String(err))}</small></p>`;
 }
 
-// Kurze Meldung unten. Optional mit Knopf (z.B. "Rückgängig"): toast(text, { ms, action: { label, fn } }).
+// Kurze Meldung unten. Optional mit Knöpfen (z.B. "Rückgängig"):
+// toast(text, { ms, action: { label, fn } }) oder toast(text, { ms, actions: [{ label, fn }, …] }).
 let toastTimer = null;
 function toast(msg, opts = {}) {
-  const { ms = 1600, action = null } = typeof opts === "number" ? { ms: opts } : opts;
+  const { ms = 1600, action = null, actions = action ? [action] : [] } = typeof opts === "number" ? { ms: opts } : opts;
   toastEl.textContent = msg;
-  toastEl.classList.toggle("has-action", !!action);
-  if (action) {
+  toastEl.classList.toggle("has-action", actions.length > 0);
+  for (const a of actions) {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.textContent = action.label;
+    btn.textContent = a.label;
     btn.addEventListener("click", () => {
       toastEl.classList.remove("show", "has-action");
-      action.fn();
+      a.fn();
     }, { once: true });
     toastEl.append(" ", btn);
   }
@@ -314,19 +333,235 @@ function openDialog(html) {
   return { overlay, close };
 }
 
-// Detailansicht eines Artikels: Foto gross, Foto ändern, Verschieben, Entfernen.
+// --- Alle Behälter (für Pfad, Unterbehälter, Verschieben) ---
+// Ein einziger Listener für die ganze Seite: Map id → { name, type?, parent? }.
+
+const allContainers = new Map();
+let containersLoaded = false;
+const containerListeners = new Set();
+let containersError = null;
+
+function watchContainers() {
+  onSnapshot(collection(db, "containers"), (snap) => {
+    allContainers.clear();
+    snap.forEach((d) => {
+      const data = d.data();
+      allContainers.set(d.id, {
+        name: data.name || d.id,
+        type: CONTAINER_TYPES[data.type] ? data.type : undefined,
+        parent: typeof data.parent === "string" && data.parent ? data.parent : undefined,
+      });
+    });
+    containersLoaded = true;
+    containerListeners.forEach((fn) => fn());
+  }, (err) => {
+    containersError = err;
+    containerListeners.forEach((fn) => fn(err));
+  });
+}
+
+// fn() wird bei jeder Änderung aufgerufen (fn(err) bei Fehler), sofort einmal, falls schon geladen.
+function onContainers(fn) {
+  containerListeners.add(fn);
+  if (containersLoaded) fn();
+  else if (containersError) fn(containersError);
+}
+
+function containersReady() {
+  return new Promise((resolve, reject) => {
+    if (containersLoaded) return resolve();
+    const fn = (err) => {
+      containerListeners.delete(fn);
+      if (err) reject(err); else resolve();
+    };
+    containerListeners.add(fn);
+  });
+}
+
+function pathLabel(id) {
+  return formatPath(containerPath(id, allContainers));
+}
+
+function typeLabel(type) {
+  return CONTAINER_TYPES[type] || "";
+}
+
+// --- MHD (Mindesthaltbarkeitsdatum) ---
+
+function mhdBadge(mhd) {
+  const status = mhdStatus(mhd, new Date());
+  if (!status) return "";
+  const text = status === "expired" ? `abgelaufen ${formatDate(mhd)}` : `MHD ${formatDate(mhd)}`;
+  return `<span class="mhd mhd-${status}">${escapeHtml(text)}</span>`;
+}
+
+function withSpace(html) {
+  return html ? ` ${html}` : "";
+}
+
+function saveMhd(containerId, itemId, item, mhd) {
+  const data = { mhd: mhd ? mhd : deleteField(), updatedAt: serverTimestamp() };
+  background(updateDoc(itemRef(containerId, itemId), data), "MHD speichern");
+  item.mhd = mhd || undefined;
+  toast(mhd ? `"${item.name}": MHD ${formatDate(mhd)}` : `"${item.name}": MHD entfernt`);
+}
+
+// Auswahl des MHD: Schnellwahl, Kalender, entfernen, (Experiment) mit Kamera lesen.
+function showMhdDialog(containerId, itemId, item) {
+  const today = new Date();
+  const current = isValidIsoDate(item.mhd) ? item.mhd : "";
+  const { overlay, close } = openDialog(`
+    <strong></strong>
+    <span class="muted">Mindestens haltbar bis: <b>${current ? escapeHtml(formatDate(current)) : "–"}</b></span>
+    <div class="photo-actions">
+      <button type="button" data-add="3">+3 Tage</button>
+      <button type="button" data-add="7">+1 Woche</button>
+      <button type="button" data-add="m1">+1 Monat</button>
+    </div>
+    <label class="muted" for="mhd-date">Datum wählen:</label>
+    <div class="photo-actions">
+      <input type="date" id="mhd-date" class="big-select" min="2000-01-01" max="2099-12-31" value="${escapeHtml(current || addToDate(today, { days: 7 }))}" />
+      <button type="button" data-action="date">OK</button>
+    </div>
+    <div class="photo-actions">
+      <button type="button" data-action="camera" class="secondary">📷 Datum mit Kamera lesen (Experiment)</button>
+    </div>
+    <div class="photo-actions">
+      ${current ? `<button type="button" data-action="clear" class="danger">MHD entfernen</button>` : ""}
+      <button type="button" data-action="close" class="secondary">Abbrechen</button>
+    </div>
+  `);
+  overlay.querySelector("strong").textContent = item.name;
+  overlay.querySelectorAll("[data-add]").forEach((b) => b.addEventListener("click", () => {
+    const v = b.dataset.add;
+    close();
+    saveMhd(containerId, itemId, item, addToDate(today, v === "m1" ? { months: 1 } : { days: Number(v) }));
+  }));
+  overlay.querySelector('[data-action="date"]').addEventListener("click", () => {
+    const v = overlay.querySelector("#mhd-date").value;
+    if (!isValidIsoDate(v)) {
+      toast("Bitte ein gültiges Datum wählen");
+      return;
+    }
+    close();
+    saveMhd(containerId, itemId, item, v);
+  });
+  overlay.querySelector('[data-action="clear"]')?.addEventListener("click", () => {
+    close();
+    saveMhd(containerId, itemId, item, "");
+  });
+  overlay.querySelector('[data-action="camera"]').addEventListener("click", () => {
+    close();
+    readDateWithCamera(containerId, itemId, item);
+  });
+}
+
+// Experiment: Foto der Packung → zuerst GS1-Code (DataMatrix/QR mit Verfallsdatum, AI 17), sonst
+// Texterkennung (tesseract.js, wird erst jetzt geladen). Der Vorschlag muss immer bestätigt werden.
+const mhdInput = document.createElement("input");
+mhdInput.type = "file";
+mhdInput.accept = "image/*";
+mhdInput.setAttribute("capture", "environment");
+mhdInput.style.display = "none";
+document.body.appendChild(mhdInput);
+let pendingMhdTarget = null;
+
+mhdInput.addEventListener("change", () => {
+  const file = mhdInput.files[0];
+  const target = pendingMhdTarget;
+  mhdInput.value = "";
+  if (file && target) recognizeMhd(target, file);
+});
+
+function readDateWithCamera(containerId, itemId, item) {
+  pendingMhdTarget = { containerId, itemId, item };
+  mhdInput.click();
+}
+
+async function gs1DatesFromImage(canvas) {
+  if (!("BarcodeDetector" in window)) return [];
+  try {
+    const supported = await BarcodeDetector.getSupportedFormats();
+    const formats = ["data_matrix", "qr_code"].filter((f) => supported.includes(f));
+    if (!formats.length) return [];
+    const codes = await new BarcodeDetector({ formats }).detect(canvas);
+    return [...new Set(codes.map((c) => parseGs1Expiry(c.rawValue)).filter(Boolean))];
+  } catch (err) {
+    console.warn("Barcode-Erkennung nicht möglich:", err);
+    return [];
+  }
+}
+
+async function recognizeMhd({ containerId, itemId, item }, file) {
+  let canvas;
+  try {
+    canvas = scaledCanvas(await loadBlobImage(file), 1600);
+  } catch (err) {
+    toast("Foto konnte nicht gelesen werden", 3000);
+    return;
+  }
+  let dates = await gs1DatesFromImage(canvas);
+  let source = "Code";
+  let rawText = "";
+  if (!dates.length) {
+    source = "Text";
+    try {
+      toast("Texterkennung wird geladen… (beim ersten Mal ca. 4 MB)", 8000);
+      const { recognizeText } = await import("./ocr.js");
+      rawText = await recognizeText(canvas, (p) => toast(`Text wird erkannt… ${Math.round(p * 100)}%`, 8000));
+      dates = parseDatesFromText(rawText, new Date());
+    } catch (err) {
+      console.error("Texterkennung fehlgeschlagen:", err);
+      toast(`Texterkennung nicht möglich (${err.message || err})`, 4000);
+      return;
+    }
+  }
+  showMhdSuggestions(containerId, itemId, item, dates.slice(0, 4), source, rawText);
+}
+
+function showMhdSuggestions(containerId, itemId, item, dates, source, rawText) {
+  const { overlay, close } = openDialog(`
+    <strong></strong>
+    <span class="muted">${dates.length
+      ? `Erkannt (${source === "Code" ? "aus dem Code" : "aus dem Text"}) – bitte prüfen:`
+      : "Kein Datum erkannt. Bitte im Kalender wählen."}</span>
+    ${dates.map((d) => `<div class="photo-actions"><button type="button" data-date="${escapeHtml(d)}">${escapeHtml(formatDate(d))} übernehmen</button></div>`).join("")}
+    ${rawText ? `<small class="muted ocr-text"></small>` : ""}
+    <div class="photo-actions">
+      <button type="button" data-action="manual" class="secondary">Selbst wählen</button>
+      <button type="button" data-action="close" class="secondary">Abbrechen</button>
+    </div>
+  `);
+  overlay.querySelector("strong").textContent = item.name;
+  const raw = overlay.querySelector(".ocr-text");
+  if (raw) raw.textContent = `Gelesen: ${rawText.replace(/\s+/g, " ").trim().slice(0, 120)}`;
+  overlay.querySelectorAll("[data-date]").forEach((b) => b.addEventListener("click", () => {
+    close();
+    saveMhd(containerId, itemId, item, b.dataset.date);
+  }));
+  overlay.querySelector('[data-action="manual"]').addEventListener("click", () => {
+    close();
+    showMhdDialog(containerId, itemId, item);
+  });
+}
+
+// Detailansicht eines Artikels: Foto gross, Foto ändern, MHD, Verschieben, Entfernen.
 function showItemDetails(containerId, itemId, item) {
   const hasPhoto = isSafePhoto(item.photo);
   const { overlay, close } = openDialog(`
     ${hasPhoto ? `<img alt="" />` : ""}
     <strong></strong>
     <span class="muted">${escapeHtml(String(item.qty ?? 1))} ${escapeHtml(item.unit || "")}</span>
+    <span class="muted">MHD: ${isValidIsoDate(item.mhd) ? mhdBadge(item.mhd) : "–"}</span>
     <div class="photo-actions">
       <button type="button" data-action="change">📷 ${hasPhoto ? "Foto ändern" : "Foto hinzufügen"}</button>
-      <button type="button" data-action="move">↪ Verschieben</button>
+      <button type="button" data-action="mhd">📅 MHD</button>
     </div>
     <div class="photo-actions">
+      <button type="button" data-action="move">↪ Verschieben</button>
       <button type="button" data-action="del" class="danger">🗑 Entfernen</button>
+    </div>
+    <div class="photo-actions">
       <button type="button" data-action="close" class="secondary">Schliessen</button>
     </div>
   `);
@@ -336,9 +571,13 @@ function showItemDetails(containerId, itemId, item) {
     close();
     openPhotoPicker(containerId, itemId);
   });
+  overlay.querySelector('[data-action="mhd"]').addEventListener("click", () => {
+    close();
+    showMhdDialog(containerId, itemId, item);
+  });
   overlay.querySelector('[data-action="move"]').addEventListener("click", () => {
     close();
-    showMoveDialog(containerId, itemId, item);
+    showMoveDialog(containerId, [{ itemId, item }]);
   });
   overlay.querySelector('[data-action="del"]').addEventListener("click", () => {
     close();
@@ -346,15 +585,16 @@ function showItemDetails(containerId, itemId, item) {
   });
 }
 
-// Behälterliste (für "Verschieben"), alphabetisch.
-async function loadContainers() {
-  const snap = await getDocs(collection(db, "containers"));
-  return snap.docs
-    .map((d) => ({ id: d.id, name: d.data().name || d.id }))
-    .sort((a, b) => a.name.localeCompare(b.name, "de"));
+// Ziele zum Verschieben: alle Behälter ausser dem aktuellen, mit Pfad, alphabetisch nach Pfad.
+async function moveTargets(fromId) {
+  await containersReady();
+  return parentOptions(null, allContainers)
+    .filter((o) => o.id !== fromId)
+    .map((o) => ({ id: o.id, name: allContainers.get(o.id)?.name || o.id, label: o.label }));
 }
 
-async function showMoveDialog(fromId, itemId, item) {
+// Verschieben-Dialog für einen oder mehrere Artikel: entries = [{ itemId, item }].
+async function showMoveDialog(fromId, entries, onDone = () => {}) {
   const { overlay, close } = openDialog(`
     <strong></strong>
     <label class="muted" for="move-target">Verschieben nach:</label>
@@ -364,20 +604,20 @@ async function showMoveDialog(fromId, itemId, item) {
       <button type="button" data-action="close" class="secondary">Abbrechen</button>
     </div>
   `);
-  overlay.querySelector("strong").textContent = item.name;
+  overlay.querySelector("strong").textContent = entries.length === 1 ? entries[0].item.name : `${entries.length} Artikel`;
   const select = overlay.querySelector("select");
   const ok = overlay.querySelector('[data-action="ok"]');
   try {
-    const containers = (await loadContainers()).filter((c) => c.id !== fromId);
-    select.innerHTML = containers.length
-      ? containers.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join("")
+    const targets = await moveTargets(fromId);
+    select.innerHTML = targets.length
+      ? targets.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.label)}</option>`).join("")
       : `<option value="">Kein anderer Behälter vorhanden</option>`;
-    ok.disabled = !containers.length;
+    ok.disabled = !targets.length;
     ok.addEventListener("click", () => {
-      const target = containers.find((c) => c.id === select.value);
+      const target = targets.find((c) => c.id === select.value);
       if (!target) return;
       close();
-      moveItem(fromId, itemId, item, target);
+      moveItems(fromId, entries, target).then(onDone);
     });
   } catch (err) {
     console.error(err);
@@ -385,34 +625,80 @@ async function showMoveDialog(fromId, itemId, item) {
   }
 }
 
-// Verschiebt einen Artikel in einen anderen Behälter (in einem Schritt: dort anlegen/addieren, hier löschen).
-async function moveItem(fromId, itemId, item, target) {
-  const unit = item.unit || "Stk";
-  const qty = parseQty(item.qty);
-  const targetItemId = isValidId(itemId) ? itemId : slugify(item.name);
-  const dst = itemRef(target.id, targetItemId);
+function itemBackup(item) {
+  const data = {
+    name: item.name,
+    qty: parseQty(item.qty),
+    unit: UNITS.includes(item.unit) ? item.unit : "Stk",
+    updatedAt: serverTimestamp(),
+  };
+  if (isSafePhoto(item.photo)) data.photo = item.photo;
+  if (isValidIsoDate(item.mhd)) data.mhd = item.mhd;
+  return data;
+}
+
+// Verschiebt Artikel in einen anderen Behälter – alle in einem Batch (dort anlegen bzw. Menge
+// addieren, hier löschen). Artikel mit gleicher ID, aber anderer Einheit im Ziel werden übersprungen.
+// Mit "Rückgängig" (ebenfalls ein Batch).
+async function moveItems(fromId, entries, target) {
   try {
-    const existing = await getDoc(dst);
+    const plans = await Promise.all(entries.map(async ({ itemId, item }) => {
+      const targetItemId = isValidId(itemId) ? itemId : slugify(item.name);
+      const dst = itemRef(target.id, targetItemId);
+      const existing = await getDoc(dst);
+      return { itemId, item, targetItemId, dst, existing: existing.exists() ? existing.data() : null };
+    }));
     const batch = writeBatch(db);
-    if (existing.exists()) {
-      const t = existing.data();
-      if ((t.unit || "Stk") !== unit) {
-        alert(`In "${target.name}" gibt es "${t.name}" schon mit Einheit ${t.unit}. Bitte dort zuerst anpassen.`);
-        return;
+    const undo = [];
+    const skipped = [];
+    const movedPlans = [];
+    for (const p of plans) {
+      const unit = UNITS.includes(p.item.unit) ? p.item.unit : "Stk";
+      const qty = parseQty(p.item.qty);
+      const src = itemRef(fromId, p.itemId);
+      if (p.existing) {
+        const t = p.existing;
+        if ((t.unit || "Stk") !== unit) {
+          skipped.push(`"${t.name}" (dort in ${t.unit})`);
+          continue;
+        }
+        const delta = Math.max(0, Math.min(qty, MAX_QTY - (t.qty || 0)));
+        const upd = { qty: increment(delta), updatedAt: serverTimestamp() };
+        const back = { qty: increment(-delta), updatedAt: serverTimestamp() };
+        if (!isSafePhoto(t.photo) && isSafePhoto(p.item.photo)) { upd.photo = p.item.photo; back.photo = deleteField(); }
+        if (!isValidIsoDate(t.mhd) && isValidIsoDate(p.item.mhd)) { upd.mhd = p.item.mhd; back.mhd = deleteField(); }
+        batch.update(p.dst, upd);
+        undo.push((b) => b.update(p.dst, back));
+      } else {
+        const data = itemBackup(p.item);
+        data.unit = unit;
+        batch.set(p.dst, data);
+        undo.push((b) => b.delete(p.dst));
       }
-      const upd = { qty: increment(Math.max(0, Math.min(qty, MAX_QTY - (t.qty || 0)))), updatedAt: serverTimestamp() };
-      if (!isSafePhoto(t.photo) && isSafePhoto(item.photo)) upd.photo = item.photo;
-      batch.update(dst, upd);
-    } else {
-      const data = { name: item.name, qty, unit, updatedAt: serverTimestamp() };
-      if (isSafePhoto(item.photo)) data.photo = item.photo;
-      batch.set(dst, data);
+      batch.delete(src);
+      const backup = itemBackup(p.item);
+      undo.push((b) => b.set(src, backup));
+      movedPlans.push(p);
     }
-    batch.delete(itemRef(fromId, itemId));
+    const moved = movedPlans.length;
+    if (skipped.length) {
+      alert(`Nicht verschoben (andere Einheit im Ziel "${target.name}"): ${skipped.join(", ")}. Bitte dort zuerst anpassen.`);
+    }
+    if (!moved) return;
     background(batch.commit(), "Verschieben");
-    toast(`"${item.name}" → ${target.name}`, {
-      ms: 5000,
-      action: { label: "Öffnen", fn: () => { location.href = `index.html?c=${encodeURIComponent(target.id)}#i=${encodeURIComponent(targetItemId)}`; } },
+    const label = moved === 1 ? `"${movedPlans[0].item.name}"` : `${moved} Artikel`;
+    const hash = moved === 1 ? `#i=${encodeURIComponent(movedPlans[0].targetItemId)}` : "";
+    toast(`${label} → ${target.name}`, {
+      ms: 6000,
+      actions: [
+        { label: "Öffnen", fn: () => { location.href = `index.html?c=${encodeURIComponent(target.id)}${hash}`; } },
+        { label: "Rückgängig", fn: () => {
+          const b = writeBatch(db);
+          undo.forEach((op) => op(b));
+          background(b.commit(), "Rückgängig");
+          toast("Verschieben rückgängig gemacht");
+        } },
+      ],
     });
   } catch (err) {
     console.error(err);
@@ -579,6 +865,75 @@ function watchOnline() {
   update();
 }
 
+// --- Zuletzt geöffnete Behälter (nur auf diesem Gerät, localStorage) ---
+
+const RECENT_KEY = "recentContainers";
+const RECENT_MAX = 6;
+
+function loadRecent() {
+  try {
+    const list = JSON.parse(storageGet(RECENT_KEY) || "[]");
+    return Array.isArray(list)
+      ? list.filter((r) => r && typeof r.id === "string" && typeof r.name === "string" && !r.id.includes("/")).slice(0, RECENT_MAX)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberRecent(id, name) {
+  const list = loadRecent().filter((r) => r.id !== id);
+  list.unshift({ id, name: String(name).slice(0, MAX_NAME) });
+  storageSet(RECENT_KEY, JSON.stringify(list.slice(0, RECENT_MAX)));
+}
+
+function forgetRecent(id) {
+  storageSet(RECENT_KEY, JSON.stringify(loadRecent().filter((r) => r.id !== id)));
+}
+
+// Aktuelle Namen/Pfade, gelöschte Behälter weglassen (sobald die Behälterliste geladen ist).
+function recentEntries() {
+  return loadRecent()
+    .filter((r) => !containersLoaded || allContainers.has(r.id))
+    .map((r) => ({ id: r.id, label: containersLoaded ? pathLabel(r.id) : r.name }));
+}
+
+function showRecentDialog() {
+  const entries = recentEntries();
+  const { overlay } = openDialog(`
+    <strong>Zuletzt geöffnet</strong>
+    <div class="recent-list">${entries.length
+      ? entries.map((r) => `<a class="card" href="index.html?c=${encodeURIComponent(r.id)}"><div class="name"><strong>${escapeHtml(r.label)}</strong></div><div aria-hidden="true">›</div></a>`).join("")
+      : `<p class="empty-hint">Noch nichts geöffnet.</p>`}</div>
+    <div class="photo-actions"><button type="button" data-action="close" class="secondary">Schliessen</button></div>
+  `);
+  void overlay;
+}
+
+// --- Navigationsleiste unten (Daumenbereich) ---
+
+function setupBottomNav() {
+  const nav = document.getElementById("bottom-nav");
+  if (!nav) return;
+  nav.hidden = false;
+  document.body.classList.add("has-bottom-nav");
+  nav.querySelector('[data-nav="search"]').addEventListener("click", () => {
+    const input = document.getElementById("search");
+    if (input) {
+      input.scrollIntoView({ block: "center" });
+      input.focus();
+    } else {
+      location.href = "index.html#suche";
+    }
+  });
+  nav.querySelector('[data-nav="scan"]').addEventListener("click", () => {
+    if (canScan) openScanner();
+    else toast("Auf diesem Gerät: QR-Code mit der Kamera-App scannen", 4000);
+  });
+  nav.querySelector('[data-nav="recent"]').addEventListener("click", showRecentDialog);
+  if (!containerId) nav.querySelector('[data-nav="home"]').setAttribute("aria-current", "page");
+}
+
 const params = new URLSearchParams(location.search);
 const containerId = params.get("c");
 
@@ -595,6 +950,8 @@ onAuthStateChanged(auth, (user) => {
   if (started) return;
   started = true;
   showLogout(user);
+  setupBottomNav();
+  watchContainers();
   if (containerId) {
     renderContainer(containerId);
   } else {
@@ -602,7 +959,25 @@ onAuthStateChanged(auth, (user) => {
   }
 });
 
-// --- Übersicht: Suche "Wo ist …?", Scanner, Behälterliste ---
+function typeOptions(selected = "") {
+  return `<option value="">Typ (optional)</option>` + Object.entries(CONTAINER_TYPES)
+    .map(([v, label]) => `<option value="${v}"${v === selected ? " selected" : ""}>${label}</option>`).join("");
+}
+
+// Karte für einen Behälter (Übersicht, Unterbehälter).
+function containerCard(id, extra = "") {
+  const c = allContainers.get(id) || { name: id };
+  const kids = childContainers(id, allContainers).length;
+  const meta = [typeLabel(c.type), kids ? `${kids} darin` : ""].filter(Boolean).join(" · ");
+  const a = document.createElement("a");
+  a.href = `index.html?c=${encodeURIComponent(id)}`;
+  a.className = "card";
+  a.dataset.cid = id;
+  a.innerHTML = `<div class="name"><strong>${escapeHtml(c.name)}</strong><small>${escapeHtml(meta || extra)}</small></div><div aria-hidden="true">›</div>`;
+  return a;
+}
+
+// --- Übersicht: Suche "Wo ist …?", Scanner, Behälterliste (oberste Ebene) ---
 
 function renderOverview() {
   main.innerHTML = `
@@ -612,11 +987,13 @@ function renderOverview() {
       ${canScan ? `<button type="button" id="scan-btn" class="scan-btn" aria-label="QR-Code scannen">📷 Scan</button>` : ""}
     </div>
     <div id="search-results" class="search-results" hidden></div>
+    <div id="recent" class="recent-chips" hidden></div>
     <h1>Deine Behälter</h1>
     <div class="container-list" id="container-list"><p class="empty-hint">Lade…</p></div>
     <p class="muted"><a id="qr-all" href="qr.html">🖨 QR-Codes für alle Behälter drucken</a></p>
     <form class="add-form" id="new-container-form">
       <input name="name" placeholder="Neuer Behälter (z.B. Kühlschrank)" maxlength="${MAX_NAME}" required />
+      <select name="type" aria-label="Typ">${typeOptions()}</select>
       <button type="submit">Anlegen</button>
     </form>
   `;
@@ -624,28 +1001,42 @@ function renderOverview() {
   const list = document.getElementById("container-list");
   const searchInput = document.getElementById("search");
   const results = document.getElementById("search-results");
-  const containerNames = new Map();
-  onSnapshot(collection(db, "containers"), (snap) => {
-    containerNames.clear();
-    snap.forEach((d) => containerNames.set(d.id, d.data().name || d.id));
-    if (snap.empty) {
+  const recentEl = document.getElementById("recent");
+
+  function renderRecent() {
+    const entries = recentEntries().slice(0, 4);
+    recentEl.hidden = !entries.length;
+    recentEl.innerHTML = entries.length ? `<span class="muted">Zuletzt:</span>` : "";
+    for (const r of entries) {
+      const a = document.createElement("a");
+      a.className = "chip";
+      a.href = `index.html?c=${encodeURIComponent(r.id)}`;
+      a.textContent = (allContainers.get(r.id)?.name) || r.label;
+      recentEl.appendChild(a);
+    }
+  }
+  renderRecent();
+
+  onContainers((err) => {
+    if (err) {
+      showError(list, err);
+      return;
+    }
+    renderRecent();
+    if (!allContainers.size) {
       list.innerHTML = `<p class="empty-hint">Noch keine Behälter angelegt.</p>`;
       return;
     }
     list.innerHTML = "";
-    const sorted = [...containerNames].sort((a, b) => a[1].localeCompare(b[1], "de"));
+    const all = [...allContainers].sort((a, b) => pathLabel(a[0]).localeCompare(pathLabel(b[0]), "de"));
     const qrParams = new URLSearchParams();
-    for (const [cid, cname] of sorted) { qrParams.append("c", cid); qrParams.append("n", cname); }
+    for (const [cid, c] of all) { qrParams.append("c", cid); qrParams.append("n", c.name); }
     document.getElementById("qr-all").href = `qr.html?${qrParams}`;
-    for (const [id, name] of sorted) {
-      const a = document.createElement("a");
-      a.href = `index.html?c=${encodeURIComponent(id)}`;
-      a.className = "card";
-      a.innerHTML = `<div class="name"><strong>${escapeHtml(name)}</strong><small>${escapeHtml(id)}</small></div><div aria-hidden="true">›</div>`;
-      list.appendChild(a);
-    }
+    const top = all.filter(([id]) => isTopLevel(id, allContainers))
+      .sort((a, b) => a[1].name.localeCompare(b[1].name, "de"));
+    for (const [id] of top) list.appendChild(containerCard(id, id));
     if (searchInput.value) showResults();
-  }, (err) => showError(list, err));
+  });
 
   // Suche über alle Behälter. Die Artikel werden erst beim ersten Tippen geladen (spart Lesezugriffe).
   let allItems = null;
@@ -658,8 +1049,8 @@ function renderOverview() {
     } catch (err) {
       // Ältere Regeln (ohne Collection-Group-Freigabe): Behälter einzeln abfragen.
       if (err.code !== "permission-denied") throw err;
-      const ids = containerNames.size ? [...containerNames.keys()] : (await loadContainers()).map((c) => c.id);
-      const snaps = await Promise.all(ids.map((id) => getDocs(collection(db, "containers", id, "items"))));
+      await containersReady();
+      const snaps = await Promise.all([...allContainers.keys()].map((id) => getDocs(collection(db, "containers", id, "items"))));
       docs = snaps.flatMap((s) => s.docs);
     }
     return docs
@@ -674,24 +1065,33 @@ function renderOverview() {
       return;
     }
     results.hidden = false;
+    // Behälter selbst (z.B. "Gemüsefach") gleich anzeigen, Artikel sobald geladen.
+    const containerHits = searchItems(
+      [...allContainers].map(([id, c]) => ({ id, name: c.name, containerName: "" })), q, 5);
+    results.innerHTML = "";
+    for (const c of containerHits) {
+      const a = containerCard(c.id);
+      a.classList.add("result");
+      a.querySelector("small").textContent = `Behälter · ${pathLabel(c.id)}`;
+      results.appendChild(a);
+    }
     if (!allItems) {
-      results.innerHTML = `<p class="empty-hint">Suche…</p>`;
+      results.insertAdjacentHTML("beforeend", `<p class="empty-hint">Suche…</p>`);
       return;
     }
-    const withNames = allItems.map((it) => ({ ...it, containerName: containerNames.get(it.containerId) || it.containerId }));
+    const withNames = allItems.map((it) => ({ ...it, containerName: pathLabel(it.containerId) }));
     const hits = searchItems(withNames, q);
-    if (!hits.length) {
+    if (!hits.length && !containerHits.length) {
       results.innerHTML = `<p class="empty-hint">Nichts gefunden für „${escapeHtml(q)}“.</p>`;
       return;
     }
-    results.innerHTML = "";
     for (const it of hits) {
       const a = document.createElement("a");
       a.className = "card result";
       a.href = `index.html?c=${encodeURIComponent(it.containerId)}#i=${encodeURIComponent(it.id)}`;
       a.innerHTML = `
         <span class="thumb-btn small">${isSafePhoto(it.photo) ? `<img class="thumb" alt="" decoding="async" />` : "📦"}</span>
-        <div class="name"><strong>${escapeHtml(it.name)}</strong><small>${escapeHtml(String(it.qty ?? 1))} ${escapeHtml(it.unit || "")} · in <b>${escapeHtml(it.containerName)}</b></small></div>
+        <div class="name"><strong>${escapeHtml(it.name)}</strong><small>${escapeHtml(String(it.qty ?? 1))} ${escapeHtml(it.unit || "")} · in <b>${escapeHtml(it.containerName)}</b>${withSpace(mhdBadge(it.mhd))}</small></div>
         <div aria-hidden="true">›</div>`;
       const img = a.querySelector("img");
       if (img) img.src = it.photo;
@@ -708,25 +1108,101 @@ function renderOverview() {
         .finally(() => { loading = null; });
     }
   });
+  if (location.hash === "#suche") {
+    history.replaceState(null, "", "index.html");
+    searchInput.focus();
+  }
 
   document.getElementById("scan-btn")?.addEventListener("click", openScanner);
 
   document.getElementById("new-container-form").addEventListener("submit", (e) => {
     e.preventDefault();
-    const name = e.target.name.value.trim();
+    const name = e.target.name.value.trim().slice(0, MAX_NAME);
+    const type = CONTAINER_TYPES[e.target.type.value] ? e.target.type.value : "";
     if (!name) return;
     const id = slugify(name);
     if (!isValidId(id)) {
       toast("Bitte einen Namen mit Buchstaben oder Ziffern eingeben", 3000);
       return;
     }
-    if (containerNames.has(id)) {
+    if (allContainers.has(id)) {
       location.href = `index.html?c=${encodeURIComponent(id)}`;
       return;
     }
-    background(setDoc(doc(db, "containers", id), { name, createdAt: serverTimestamp() }, { merge: true }), "Anlegen");
+    const data = { name, createdAt: serverTimestamp() };
+    if (type) data.type = type;
+    background(setDoc(doc(db, "containers", id), data, { merge: true }), "Anlegen");
     e.target.reset();
     toast(`"${name}" angelegt`);
+  });
+}
+
+// --- Behälter bearbeiten: Name, Typ, "liegt in", löschen ---
+
+function showContainerSettings(id, onDeleted) {
+  const c = allContainers.get(id) || { name: id };
+  const options = parentOptions(id, allContainers).filter((o) => o.id !== id);
+  const { overlay, close } = openDialog(`
+    <strong>Behälter bearbeiten</strong>
+    <label class="muted" for="cs-name">Name</label>
+    <input id="cs-name" class="big-select" maxlength="${MAX_NAME}" />
+    <label class="muted" for="cs-type">Typ</label>
+    <select id="cs-type" class="big-select">${typeOptions(c.type || "")}</select>
+    <label class="muted" for="cs-parent">Liegt in</label>
+    <select id="cs-parent" class="big-select">
+      <option value="">– nirgends (oberste Ebene) –</option>
+      ${options.map((o) => `<option value="${escapeHtml(o.id)}"${o.id === c.parent ? " selected" : ""}>${escapeHtml(o.label)}</option>`).join("")}
+    </select>
+    <div class="photo-actions">
+      <button type="button" data-action="save">Speichern</button>
+      <button type="button" data-action="close" class="secondary">Abbrechen</button>
+    </div>
+    <div class="photo-actions">
+      <button type="button" data-action="delete" class="danger">🗑 Behälter löschen</button>
+    </div>
+    <small class="muted" id="cs-hint">Der QR-Code bleibt beim Umbenennen und Verschieben gültig.</small>
+  `);
+  const nameInput = overlay.querySelector("#cs-name");
+  nameInput.value = c.name;
+  overlay.querySelector('[data-action="save"]').addEventListener("click", () => {
+    const name = nameInput.value.trim().slice(0, MAX_NAME);
+    const type = overlay.querySelector("#cs-type").value;
+    const parent = overlay.querySelector("#cs-parent").value;
+    if (!name) {
+      toast("Bitte einen Namen eingeben");
+      return;
+    }
+    if (parent && (wouldCreateCycle(id, parent, allContainers) || !allContainers.has(parent))) {
+      toast("Ein Behälter kann nicht in sich selbst oder einem eigenen Unterbehälter liegen", 4000);
+      return;
+    }
+    close();
+    background(setDoc(doc(db, "containers", id), {
+      name,
+      type: CONTAINER_TYPES[type] ? type : deleteField(),
+      parent: parent || deleteField(),
+    }, { merge: true }), "Speichern");
+    toast("Gespeichert");
+  });
+  overlay.querySelector('[data-action="delete"]').addEventListener("click", async () => {
+    const hint = overlay.querySelector("#cs-hint");
+    const kids = childContainers(id, allContainers);
+    if (kids.length) {
+      hint.textContent = `Nicht möglich: Darin ${kids.length === 1 ? "liegt" : "liegen"} noch ${kids.map((k) => `"${k.name}"`).join(", ")}. Zuerst verschieben oder löschen.`;
+      return;
+    }
+    try {
+      const items = await getDocs(collection(db, "containers", id, "items"));
+      if (!items.empty) {
+        hint.textContent = `Nicht möglich: Im Behälter ${items.size === 1 ? "ist noch 1 Artikel" : `sind noch ${items.size} Artikel`}. Nur leere Behälter können gelöscht werden.`;
+        return;
+      }
+    } catch (err) {
+      hint.textContent = `Prüfen fehlgeschlagen (${err.code || err.message})`;
+      return;
+    }
+    close();
+    onDeleted();
   });
 }
 
@@ -739,14 +1215,24 @@ function renderContainer(id) {
     return;
   }
   main.innerHTML = `
+    <nav class="breadcrumb" id="breadcrumb" aria-label="Pfad" hidden></nav>
     <div class="title-row">
       <h1 id="container-title">…</h1>
-      <button type="button" class="link-btn" id="rename-btn" aria-label="Behälter umbenennen">✏️</button>
+      <button type="button" class="link-btn" id="select-btn" aria-label="Mehrere Artikel auswählen" title="Auswählen und verschieben">☑</button>
+      <button type="button" class="link-btn" id="edit-btn" aria-label="Behälter bearbeiten" title="Umbenennen, Typ, liegt in, löschen">✏️</button>
       <a class="link-btn" id="qr-link" href="qr.html" aria-label="QR-Code für diesen Behälter">QR</a>
     </div>
+    <small class="muted" id="container-type"></small>
+    <div id="children" class="container-list children" hidden></div>
     <input type="search" id="item-filter" class="search-input" placeholder="🔍 In diesem Behälter filtern"
       autocomplete="off" aria-label="Artikel filtern" hidden />
     <div id="items"><p class="empty-hint">Lade…</p></div>
+    <div class="select-bar" id="select-bar" hidden>
+      <span id="select-count">0 ausgewählt</span>
+      <button type="button" id="select-all" class="secondary">Alle</button>
+      <button type="button" id="select-move" disabled>↪ Verschieben</button>
+      <button type="button" id="select-cancel" class="secondary" aria-label="Auswahl beenden">✕</button>
+    </div>
     <form class="add-form" id="add-item-form">
       <label class="photo-pick" title="Foto aufnehmen oder hochladen">
         <input name="photo" type="file" accept="image/*" hidden />
@@ -762,6 +1248,14 @@ function renderContainer(id) {
       <button type="submit">+ Hinzufügen</button>
       <small class="muted add-hint" id="add-hint" hidden></small>
     </form>
+    <details class="sub-form">
+      <summary>+ Behälter hier hineinlegen (z.B. Fach, Box)</summary>
+      <form class="add-form" id="new-child-form">
+        <input name="name" placeholder="Name (z.B. Gemüsefach)" maxlength="${MAX_NAME}" required />
+        <select name="type" aria-label="Typ">${typeOptions()}</select>
+        <button type="submit">Anlegen</button>
+      </form>
+    </details>
   `;
 
   const itemsEl = document.getElementById("items");
@@ -770,9 +1264,16 @@ function renderContainer(id) {
   const form = document.getElementById("add-item-form");
   const addHint = document.getElementById("add-hint");
   const photoPreview = form.querySelector(".photo-pick-preview");
+  const breadcrumbEl = document.getElementById("breadcrumb");
+  const childrenEl = document.getElementById("children");
+  const typeEl = document.getElementById("container-type");
+  const selectBar = document.getElementById("select-bar");
   let containerName = id;
   let previewUrl = null;
   let currentItems = new Map();
+  let deleted = false;
+  let selecting = false;
+  const selected = new Set();
 
   function resetPhotoPreview() {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -807,12 +1308,19 @@ function renderContainer(id) {
     titleEl.textContent = id;
   }
 
+  let mayCreate = true;
   onSnapshot(doc(db, "containers", id), (snap) => {
+    if (deleted) return;
     if (snap.exists()) {
+      mayCreate = false;
       containerName = snap.data().name || id;
-    } else if (!snap.metadata.fromCache && isValidId(id)) {
+      rememberRecent(id, containerName);
+    } else if (mayCreate && !snap.metadata.fromCache && isValidId(id)) {
       // Neuer QR-Code gescannt → Behälter anlegen (Name aus &n=, sonst die ID).
       // Nur nach Antwort vom Server, sonst würde ein leerer Offline-Cache den Namen überschreiben.
+      // Nur beim Öffnen: Löscht jemand anderes den Behälter, während er hier offen ist, wird er
+      // nicht sofort wieder angelegt.
+      mayCreate = false;
       const n = (params.get("n") || "").trim().slice(0, MAX_NAME);
       containerName = n || id;
       background(setDoc(doc(db, "containers", id), { name: containerName, createdAt: serverTimestamp() }, { merge: true }), "Anlegen");
@@ -822,11 +1330,115 @@ function renderContainer(id) {
     document.getElementById("qr-link").href = `qr.html?c=${encodeURIComponent(id)}&n=${encodeURIComponent(containerName)}`;
   }, (err) => showError(itemsEl, err));
 
-  document.getElementById("rename-btn").addEventListener("click", () => {
-    const name = (prompt("Neuer Name für diesen Behälter:", containerName) || "").trim().slice(0, MAX_NAME);
-    if (!name || name === containerName) return;
-    background(setDoc(doc(db, "containers", id), { name }, { merge: true }), "Umbenennen");
-    toast(`Umbenannt in "${name}" (QR-Code bleibt gültig)`, 3000);
+  // Pfad oben, Typ, Unterbehälter.
+  onContainers((err) => {
+    if (err || deleted) return;
+    const path = containerPath(id, allContainers);
+    breadcrumbEl.innerHTML = "";
+    breadcrumbEl.hidden = path.length < 2;
+    path.slice(0, -1).forEach((p, i) => {
+      if (i) breadcrumbEl.append(" › ");
+      const a = document.createElement("a");
+      a.href = `index.html?c=${encodeURIComponent(p.id)}`;
+      a.textContent = p.name;
+      breadcrumbEl.appendChild(a);
+    });
+    typeEl.textContent = typeLabel(allContainers.get(id)?.type);
+    const kids = childContainers(id, allContainers);
+    childrenEl.hidden = !kids.length;
+    childrenEl.innerHTML = kids.length ? `<h2>Darin</h2>` : "";
+    for (const k of kids) childrenEl.appendChild(containerCard(k.id));
+  });
+
+  document.getElementById("edit-btn").addEventListener("click", async () => {
+    try {
+      await containersReady();
+    } catch (err) {
+      toast(`Fehler (${err.code || err.message})`, 4000);
+      return;
+    }
+    showContainerSettings(id, deleteThisContainer);
+  });
+
+  // Löschen (nur wenn leer, geprüft in showContainerSettings) mit Rückgängig.
+  function deleteThisContainer() {
+    const c = allContainers.get(id) || { name: containerName };
+    const backup = { name: c.name || containerName, createdAt: serverTimestamp() };
+    if (c.type) backup.type = c.type;
+    if (c.parent) backup.parent = c.parent;
+    deleted = true;
+    forgetRecent(id);
+    background(deleteDoc(doc(db, "containers", id)), "Löschen");
+    const parent = c.parent && allContainers.has(c.parent) ? c.parent : null;
+    const back = parent ? `index.html?c=${encodeURIComponent(parent)}` : "index.html";
+    main.innerHTML = `
+      <p class="empty-hint">„<span id="deleted-name"></span>“ wurde gelöscht.</p>
+      <div class="photo-actions">
+        <button type="button" id="undo-delete">Rückgängig</button>
+        <a class="button-link" href="${escapeHtml(back)}">${parent ? "Zurück" : "Zur Übersicht"}</a>
+      </div>`;
+    document.getElementById("deleted-name").textContent = backup.name;
+    document.title = "Gelöscht – Vorrat";
+    document.getElementById("undo-delete").addEventListener("click", () => {
+      background(setDoc(doc(db, "containers", id), backup), "Wiederherstellen");
+      location.href = `index.html?c=${encodeURIComponent(id)}`;
+    });
+    toast(`"${backup.name}" gelöscht`, {
+      ms: 8000,
+      action: { label: "Rückgängig", fn: () => document.getElementById("undo-delete")?.click() },
+    });
+  }
+
+  document.getElementById("new-child-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const name = f.name.value.trim().slice(0, MAX_NAME);
+    const type = CONTAINER_TYPES[f.type.value] ? f.type.value : "";
+    if (!name) return;
+    try {
+      await containersReady();
+    } catch (err) {
+      toast(`Fehler (${err.code || err.message})`, 4000);
+      return;
+    }
+    const newId = uniqueContainerId(name, isValidId(id) ? id : "", (cid) => allContainers.has(cid));
+    if (!newId) {
+      toast("Bitte einen Namen mit Buchstaben oder Ziffern eingeben", 3000);
+      return;
+    }
+    const data = { name, parent: id, createdAt: serverTimestamp() };
+    if (type) data.type = type;
+    background(setDoc(doc(db, "containers", newId), data), "Anlegen");
+    f.reset();
+    toast(`"${name}" in "${containerName}" angelegt`);
+  });
+
+  // --- Mehrfachauswahl ("Umzugsmodus") ---
+  function updateSelectBar() {
+    for (const sid of [...selected]) if (!currentItems.has(sid)) selected.delete(sid);
+    selectBar.hidden = !selecting;
+    document.body.classList.toggle("selecting", selecting);
+    document.getElementById("select-count").textContent = `${selected.size} ausgewählt`;
+    document.getElementById("select-move").disabled = !selected.size;
+    document.getElementById("select-btn").setAttribute("aria-pressed", String(selecting));
+  }
+  function setSelecting(on) {
+    selecting = on;
+    if (!on) selected.clear();
+    renderItems();
+  }
+  document.getElementById("select-btn").addEventListener("click", () => setSelecting(!selecting));
+  document.getElementById("select-cancel").addEventListener("click", () => setSelecting(false));
+  document.getElementById("select-all").addEventListener("click", () => {
+    const all = [...currentItems.keys()];
+    if (selected.size === all.length) selected.clear();
+    else all.forEach((k) => selected.add(k));
+    renderItems();
+  });
+  document.getElementById("select-move").addEventListener("click", () => {
+    const entries = [...selected].filter((k) => currentItems.has(k)).map((k) => ({ itemId: k, item: currentItems.get(k) }));
+    if (!entries.length) return;
+    showMoveDialog(id, entries, () => setSelecting(false));
   });
 
   const itemsQuery = query(collection(db, "containers", id, "items"), orderBy("name"));
@@ -835,15 +1447,16 @@ function renderContainer(id) {
 
   function renderItems() {
     const snap = lastSnap;
-    if (!snap) return;
+    if (!snap || deleted) return;
     currentItems = new Map(snap.docs.map((d) => [d.id, d.data()]));
     document.getElementById("item-names").innerHTML = [...currentItems.values()]
       .map((it) => `<option value="${escapeHtml(it.name)}"></option>`).join("");
     updateAddHint();
+    updateSelectBar();
     filterInput.hidden = snap.size < FILTER_THRESHOLD && !filterInput.value;
 
     if (snap.empty) {
-      itemsEl.innerHTML = `<p class="empty-hint">Leer – füge unten etwas hinzu.</p>`;
+      itemsEl.innerHTML = `<p class="empty-hint">${childrenEl.hidden ? "Leer – füge unten etwas hinzu." : "Keine Artikel direkt hier."}</p>`;
       return;
     }
     let entries = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -857,8 +1470,23 @@ function renderContainer(id) {
     itemsEl.innerHTML = "";
     for (const item of entries) {
       const itemId = item.id;
+      if (selecting) {
+        const row = document.createElement("label");
+        row.className = "card select-card";
+        row.dataset.id = itemId;
+        row.innerHTML = `
+          <input type="checkbox" class="select-box" ${selected.has(itemId) ? "checked" : ""} />
+          <div class="name"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(String(item.qty ?? 1))} ${escapeHtml(item.unit || "")}${withSpace(mhdBadge(item.mhd))}</small></div>`;
+        row.querySelector("input").addEventListener("change", (e) => {
+          if (e.target.checked) selected.add(itemId); else selected.delete(itemId);
+          updateSelectBar();
+        });
+        itemsEl.appendChild(row);
+        continue;
+      }
       const hasPhoto = isSafePhoto(item.photo);
       const busy = photosInProgress.has(`${id}/${itemId}`);
+      const step = qtyStep(item.unit);
       const card = document.createElement("div");
       card.className = "card";
       card.dataset.id = itemId;
@@ -867,12 +1495,12 @@ function renderContainer(id) {
           ${busy ? `<span class="spinner">⏳</span>` : hasPhoto ? `<img class="thumb" alt="" decoding="async" />` : "📷"}
         </button>
         <button type="button" class="name name-btn" data-action="details" aria-label="Details zu ${escapeHtml(item.name)}">
-          <strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.unit || "")}</small>
+          <strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.unit || "")}${withSpace(mhdBadge(item.mhd))}</small>
         </button>
         <div class="qty-controls">
-          <button type="button" class="round" data-action="dec" aria-label="Eins weniger">−</button>
+          <button type="button" class="round" data-action="dec" aria-label="${step === 1 ? "Eins weniger" : `${step} weniger`}">−</button>
           <button type="button" class="qty-value" data-action="set" aria-label="Menge eingeben">${escapeHtml(String(item.qty ?? 1))}</button>
-          <button type="button" class="round" data-action="inc" aria-label="Eins mehr">+</button>
+          <button type="button" class="round" data-action="inc" aria-label="${step === 1 ? "Eins mehr" : `${step} mehr`}">+</button>
         </div>
         <button type="button" class="delete" data-action="del" aria-label="Entfernen">🗑</button>
       `;
@@ -954,16 +1582,16 @@ function renderContainer(id) {
 }
 
 // +/−: nur die Menge ändern (increment), nicht den ganzen Artikel inkl. Foto neu schreiben.
-// So gehen gleichzeitige Änderungen auf zwei Geräten nicht verloren.
-function changeQty(containerId, itemId, item, delta) {
-  const newQty = (item.qty ?? 1) + delta;
-  if (newQty <= 0) {
+// So gehen gleichzeitige Änderungen auf zwei Geräten nicht verloren. g/ml in 50er-Schritten.
+function changeQty(containerId, itemId, item, direction) {
+  const plan = planStep(item.qty ?? 1, item.unit, direction);
+  if (plan.action === "remove") {
     removeItem(containerId, itemId, item);
     return;
   }
-  if (newQty > MAX_QTY) return;
-  item.qty = newQty; // lokal mitzählen, bis der nächste Snapshot den echten Stand bringt
-  background(updateDoc(itemRef(containerId, itemId), { qty: increment(delta), updatedAt: serverTimestamp() }));
+  if (plan.action === "none") return;
+  item.qty = plan.newQty; // lokal mitzählen, bis der nächste Snapshot den echten Stand bringt
+  background(updateDoc(itemRef(containerId, itemId), { qty: increment(plan.delta), updatedAt: serverTimestamp() }));
 }
 
 // Antippen der Zahl: Menge direkt eingeben (praktisch bei g/ml).
@@ -982,16 +1610,10 @@ function setQty(containerId, itemId, item) {
   background(updateDoc(itemRef(containerId, itemId), { qty: Math.min(MAX_QTY, n), updatedAt: serverTimestamp() }));
 }
 
-// Entfernen ohne Rückfrage, dafür mit "Rückgängig" (stellt Name, Menge, Einheit und Foto wieder her).
+// Entfernen ohne Rückfrage, dafür mit "Rückgängig" (stellt Name, Menge, Einheit, Foto und MHD wieder her).
 function removeItem(containerId, itemId, item) {
   const ref = itemRef(containerId, itemId);
-  const backup = {
-    name: item.name,
-    qty: parseQty(item.qty),
-    unit: UNITS.includes(item.unit) ? item.unit : "Stk",
-    updatedAt: serverTimestamp(),
-  };
-  if (isSafePhoto(item.photo)) backup.photo = item.photo;
+  const backup = itemBackup(item);
   background(deleteDoc(ref), "Entfernen");
   toast(`"${item.name}" entfernt`, {
     ms: 6000,
