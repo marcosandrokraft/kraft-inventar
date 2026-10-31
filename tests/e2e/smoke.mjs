@@ -894,6 +894,13 @@ test("20 Umzug: Ziel per QR-Code scannen (BarcodeDetector-Fake), unbekannte Beh�
   await page.waitForSelector("video.scanner-video", { state: "detached" });
   assert((await hint()).includes("aus dem verschoben wird"), `Hinweis gleicher Behälter: ${await hint()}`);
 
+  // Escape schliesst nur den Scanner, nicht den Verschieben-Dialog darunter
+  await page.click('.photo-dialog [data-action="scan"]');
+  await page.waitForSelector(".photo-dialog video.scanner-video");
+  await page.keyboard.press("Escape");
+  await page.waitForSelector("video.scanner-video", { state: "detached" });
+  assertEqual(await page.locator("#move-target").count(), 1, "Verschieben-Dialog bleibt offen");
+
   // Gültiges Ziel → nur ausgewählt, verschoben wird erst mit "Verschieben"
   await scan(server.url + "index.html?c=garage&n=Garage");
   await page.waitForSelector("video.scanner-video", { state: "detached" });

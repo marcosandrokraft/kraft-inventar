@@ -329,7 +329,10 @@ function openDialog(html) {
     overlay.remove();
     document.removeEventListener("keydown", onKey);
   };
-  const onKey = (e) => { if (e.key === "Escape") close(); };
+  // Escape schliesst nur das oberste Fenster (z.B. Scanner über dem Verschieben-Dialog).
+  const onKey = (e) => {
+    if (e.key === "Escape" && [...document.querySelectorAll(".photo-overlay")].pop() === overlay) close();
+  };
   document.addEventListener("keydown", onKey);
   overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
   overlay.querySelectorAll('[data-action="close"]').forEach((b) => b.addEventListener("click", close));
