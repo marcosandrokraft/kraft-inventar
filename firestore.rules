@@ -1,6 +1,7 @@
 rules_version = '2';
 // Nur angemeldete Personen aus der Liste unten dürfen lesen/schreiben, und nur Daten in der erwarteten Form.
 // Verhindert, dass Fremde mit der URL Daten sehen oder das Gratis-Kontingent aufbrauchen.
+// Tests: tests/rules.test.mjs (siehe TESTS.md).
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -9,6 +10,7 @@ service cloud.firestore {
     // Anlegen nur über die Firebase-Konsole (siehe STAND.md).
     function isMember() {
       return request.auth != null
+        && request.auth.token.email is string
         && request.auth.token.email_verified == true
         && exists(/databases/$(database)/documents/members/$(request.auth.token.email.lower()));
     }
@@ -16,6 +18,12 @@ service cloud.firestore {
     // Die Mitgliederliste kann aus der App weder gelesen noch geändert werden.
     match /members/{email} {
       allow read, write: if false;
+    }
+
+    // IDs, wie sie die App aus Namen erzeugt (slugify): Kleinbuchstaben, Ziffern, Umlaute, Bindestrich.
+    // Nur beim Neuanlegen geprüft, damit allenfalls vorhandene ältere Dokumente bearbeitbar bleiben.
+    function validId(id) {
+      return id.size() <= 100 && id.matches('^[a-z0-9äöüß]+(-[a-z0-9äöüß]+)*$');
     }
 
     function validName(d) {
@@ -28,24 +36,37 @@ service cloud.firestore {
         && (!('createdAt' in d) || d.createdAt is timestamp);
     }
 
+    // Fotos: nur JPEG als data-URL (so erzeugt sie die App), max. ~900 KB (Dokumentlimit 1 MiB).
+    function validPhoto(p) {
+      return p is string && p.size() <= 900000
+        && p.matches('^data:image/jpeg;base64,[A-Za-z0-9+/]+=*$');
+    }
+
     function validItem(d) {
       return d.keys().hasOnly(['name', 'qty', 'unit', 'photo', 'updatedAt'])
         && validName(d)
         && d.qty is int && d.qty >= 1 && d.qty <= 100000
         && d.unit in ['Stk', 'Packung', 'g', 'ml']
-        && (!('photo' in d) || (d.photo is string && d.photo.size() <= 900000))
+        && (!('photo' in d) || validPhoto(d.photo))
         && (!('updatedAt' in d) || d.updatedAt is timestamp);
     }
 
     match /containers/{containerId} {
       allow read: if isMember();
-      allow create, update: if isMember() && containerId.size() <= 100 && validContainer(request.resource.data);
+      allow create: if isMember() && validId(containerId) && validContainer(request.resource.data);
+      allow update: if isMember() && containerId.size() <= 100 && validContainer(request.resource.data);
       allow delete: if false;
 
       match /items/{itemId} {
         allow read, delete: if isMember();
-        allow create, update: if isMember() && itemId.size() <= 100 && validItem(request.resource.data);
+        allow create: if isMember() && validId(itemId) && validItem(request.resource.data);
+        allow update: if isMember() && itemId.size() <= 100 && validItem(request.resource.data);
       }
+    }
+
+    // Globale Suche ("Wo ist X?") liest alle Artikel aller Behälter mit einer Collection-Group-Abfrage.
+    match /{path=**}/items/{itemId} {
+      allow read: if isMember();
     }
   }
 }
