@@ -454,3 +454,50 @@ export function parseGs1Expiry(raw) {
   }
   return pick(found);
 }
+
+// --- Liste "läuft bald ab" (Runde 3) ---
+
+// Wählbare Zeiträume der Liste (Tage ab heute). 3 = wie die orange Markierung (SOON_DAYS).
+export const EXPIRY_WINDOWS = [SOON_DAYS, 7];
+
+// Artikel, deren MHD abgelaufen ist oder in höchstens `days` Tagen abläuft – das früheste Datum
+// zuerst, bei gleichem Datum alphabetisch. Artikel ohne/mit ungültigem MHD fallen weg.
+// Ergebnis: Kopien der Artikel mit zusätzlich `days` (Tage bis zum MHD, negativ = abgelaufen).
+export function expiringItems(items, today, days = SOON_DAYS) {
+  const out = [];
+  for (const item of items) {
+    if (!isValidIsoDate(item?.mhd)) continue;
+    const d = daysUntil(item.mhd, today);
+    if (d <= days) out.push({ ...item, days: d });
+  }
+  return out.sort((a, b) => a.mhd.localeCompare(b.mhd)
+    || String(a.name ?? "").localeCompare(String(b.name ?? ""), "de"));
+}
+
+// Tage bis zum MHD als Text: "heute", "morgen", "in 3 Tagen", "seit gestern", "seit 4 Tagen".
+export function daysText(days) {
+  if (days === 0) return "heute";
+  if (days === 1) return "morgen";
+  if (days > 1) return `in ${days} Tagen`;
+  if (days === -1) return "seit gestern";
+  return `seit ${-days} Tagen`;
+}
+
+// --- Umzugsmodus: Ziel per QR-Code (Runde 3) ---
+
+// Gescannter Text → Ziel für den Umzug. Gleiche Prüfung wie beim normalen Scan
+// (containerIdFromScan), aber ein unbekannter Behälter wird NICHT angelegt, sondern abgelehnt.
+// → { id } | { error: "invalid" } (kein Behälter-Link dieser App) | { error: "same", id }
+//   (der Behälter, aus dem verschoben wird) | { error: "unknown", id, name } (gibt es nicht).
+// `containers`: Map id → { name, … } aller bekannten Behälter.
+export function moveTargetFromScan(text, appHref, fromId, containers) {
+  const id = containerIdFromScan(text, appHref);
+  if (!id) return { error: "invalid" };
+  if (id === fromId) return { error: "same", id };
+  if (!containers.has(id)) {
+    let name = "";
+    try { name = (new URL(String(text).trim()).searchParams.get("n") || "").trim().slice(0, MAX_NAME); } catch {}
+    return { error: "unknown", id, name: name || id };
+  }
+  return { id };
+}
