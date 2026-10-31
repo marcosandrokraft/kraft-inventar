@@ -12,13 +12,23 @@ oder die Navigation ändern würde. Antworte einfach mit der Nummer und "ja", "n
 | 3 | Mehr Einheiten | **ja**: l, kg, Flasche, Dose, Packung, Glas, Stück | umgesetzt ("Stück" = bestehendes "Stk") |
 | 4 | Behälter löschen | **ja**, nur wenn leer, mit Rückgängig | umgesetzt |
 | 5 | Einkaufsliste bei Menge 0 | **später**, zweiter Schritt, bezogen auf Küche/Kühlschrank | offen |
-| 6 | MHD | **ja**, optional für jeden Artikel; Kamera-Erkennung als Experiment | umgesetzt |
+| 6 | MHD | **ja**, optional für jeden Artikel; Kamera-Erkennung als Experiment | umgesetzt; Liste "läuft bald ab" seit Runde 3 (siehe C) |
 | 7 | ±50 bei g/ml | **ja** | umgesetzt |
-| 8 | Umzugsmodus | **ja** | umgesetzt (Auswahl + "Verschieben nach…"; Ziel-QR scannen noch nicht) |
+| 8 | Umzugsmodus | **ja** | umgesetzt (Auswahl + "Verschieben nach…"; Ziel-QR scannen seit Runde 3, siehe D) |
 | 9 | Leiste unten + zuletzt geöffnet | **ja** | umgesetzt |
 | 10 | Fotos auslagern / Firebase Storage | **nein** | – |
 | 11 | Firebase selbst hosten | **ja**, falls gratis, mind. gleich schnell, sicherer | umgesetzt (Begründung in STAND.md) |
 | 12 | "Zuletzt geändert von" | **nein** | – |
+
+## Entscheidungen zu den offenen Fragen aus Runde 2 (2026-10-31, Runde 3)
+
+| | Frage | Entscheidung | Stand |
+|---|---|---|---|
+| A | Übersicht: nur oberste Ebene oder Baum? | **bleibt** oberste Ebene | unverändert |
+| B | g/ml: − unter 50 entfernt den Artikel? | **bleibt** so (mit Rückgängig) | unverändert |
+| C | Liste "läuft bald ab" | **ja**: eigene Ansicht, abgelaufen + ≤ 3 Tage, Schalter ≤ 7 Tage, nach Datum, mit Pfad, Antippen öffnet + markiert | umgesetzt (`?liste=ablauf`, Leiste unten "Läuft ab" + Link in der Übersicht); Einkaufsliste später, Platz dafür vorbereitet |
+| D | Umzug: Ziel-QR-Code scannen | **ja**, nur wo BarcodeDetector verfügbar; manuelle Auswahl bleibt; unbekannter Behälter wird abgelehnt, nicht angelegt | umgesetzt (Scan wählt nur aus, verschoben wird mit "Verschieben") |
+| E | Löschen: Regeln zusätzlich einschränken? | **bleibt** (alle Mitglieder dürfen, "nur wenn leer" prüft die App) | `firestore.rules` unverändert |
 
 Die Abschnitte unten sind der ursprüngliche Vorschlagstext (zum Nachlesen).
 

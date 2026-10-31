@@ -79,9 +79,11 @@ die Regeln in der Konsole erneut veröffentlichen.
   Spiegelungen, gewölbte Dosen und kleine Schrift werden oft falsch oder gar nicht erkannt. Der
   Vorschlag wird nie automatisch übernommen, du bestätigst ihn immer.
 - ☑ neben dem Behälternamen: **Umzugsmodus** – mehrere Artikel ankreuzen und auf einmal
-  verschieben (mit Rückgängig).
-- Leiste unten: Übersicht, Suchen, Scannen (Android/Chrome), **Zuletzt** (zuletzt geöffnete
-  Behälter, nur auf diesem Gerät gespeichert).
+  verschieben (mit Rückgängig). Auf Android/Chrome kann das Ziel auch per QR-Code gescannt werden
+  ("📷 Ziel-QR-Code scannen"; nur bestehende Behälter, der Scan wählt das Ziel nur aus).
+- Leiste unten: Übersicht, Suchen, Scannen (Android/Chrome), **Läuft ab** (alle Artikel mit MHD
+  abgelaufen oder in ≤ 3 bzw. ≤ 7 Tagen, nach Datum, mit Behälterpfad; antippen öffnet den Behälter),
+  **Zuletzt** (zuletzt geöffnete Behälter, nur auf diesem Gerät gespeichert).
 - Ohne Netz: Zuletzt angesehene Inhalte bleiben sichtbar, Änderungen werden später übertragen
   ("Offline" oben). Abmelden löscht die Offline-Kopie auf dem Gerät.
 - Vorschaubild links am Artikel: ohne Foto → 📷 antippen fügt eins hinzu; mit Foto → Grossansicht

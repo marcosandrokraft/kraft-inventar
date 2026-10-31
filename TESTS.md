@@ -7,6 +7,9 @@ Foto-Prüfung, Mengen addieren, Suche, QR-Links/Scanner, Zuschnitt nach Freistel
 `tests/unit/runde2.test.mjs`: Einheiten, Schrittweite ±50, Pfad/Unterbehälter/Zyklen, eindeutige
 IDs für Unterbehälter, MHD (Schnellwahl, Status, Sommerzeit), Datumserkennung aus OCR-Text,
 GS1-Verfallsdatum (AI 17, ersatzweise Mindesthaltbarkeit AI 15) aus DataMatrix-Rohtext, Klammer-Schreibweise und Digital Link.
+`tests/unit/runde3.test.mjs`: Liste "läuft bald ab" (Filter 3/7 Tage, Sortierung, Monats-/Jahreswechsel,
+Sommerzeit, Texte "heute"/"in 3 Tagen"), Umzugsziel aus gescanntem QR-Code (fremde Links, eigener und
+unbekannter Behälter werden abgelehnt).
 Braucht nur Node.js (getestet mit v16.16.0), kein Java, kein Netz:
 
 ```sh
@@ -78,6 +81,11 @@ und "zuletzt geöffnet", Umzugsmodus + Rückgängig, MHD (Schnellwahl, Kalender,
 Kamera mit gefälschter Texterkennung bzw. gefälschtem BarcodeDetector – immer mit Bestätigung);
 Tests 17–18: Auto-Anlegen nur über Links von aussen, Löschen auf anderem Gerät, "Alle" beachtet den
 Filter, Dialoge liegen über der Leiste unten.
+Runde 3: Test 19 Liste "läuft bald ab" (3/7 Tage, Sortierung, Pfad, XSS, 360 px, Antippen öffnet und
+markiert, nur eine Artikel-Abfrage – der Fake zählt `getDocs` in `window.__queries`); Test 20 Umzugsziel
+per QR-Code mit gefälschtem `BarcodeDetector` und gefälschter Kamera (`captureStream` eines Canvas):
+fremder Code, eigener und unbekannter Behälter abgelehnt (nichts angelegt), Escape schliesst nur den
+Scanner, gültiges Ziel wird ausgewählt und verschoben.
 Firebase wird seit Runde 2 aus `vendor/firebase-10.14.1/` geladen; die Tests ersetzen genau diese
 Dateien durch die Fakes, jede Anfrage an gstatic.com gilt als Fehler.
 

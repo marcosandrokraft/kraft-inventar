@@ -1,6 +1,6 @@
 # Aktueller Stand
 
-Letzter Stand: 2026-10-31, Runde 2 (Branch `verbesserungen-2026-10-31`, noch nicht gemergt). Diese Datei fasst den Fortschritt zusammen, damit man (auch mit einer
+Letzter Stand: 2026-10-31, Runde 3 (Branch `verbesserungen-2026-10-31`, noch nicht gemergt). Diese Datei fasst den Fortschritt zusammen, damit man (auch mit einer
 neuen Claude-Session auf einem anderen Gerät) nahtlos weitermachen kann.
 
 **Die App läuft:** https://marcosandrokraft.github.io/kraft-inventar/ – mit Anmeldung per E-Mail-Link,
@@ -61,6 +61,61 @@ Die Person öffnet die App und meldet sich mit genau dieser Adresse an. Entferne
 
 - Erledigt am 2026-10-31: +/− per `increment()`, gleicher Artikel addiert die Menge.
 - Weitere Ideen, die eine Entscheidung brauchen: [VORSCHLAEGE.md](VORSCHLAEGE.md).
+
+## Runde 3 (2026-10-31, gleicher Branch `verbesserungen-2026-10-31`)
+
+**Was du tun musst (in dieser Reihenfolge) – gilt für Runde 2 und 3 zusammen:**
+
+1. **Regeln ZUERST veröffentlichen, erst danach mergen und pushen:** Firebase-Konsole → Firestore
+   Database → Regeln → kompletten Inhalt von [firestore.rules](firestore.rules) einfügen →
+   Veröffentlichen. Runde 3 hat die Regeln **nicht** geändert, aber die Regeln aus Runde 2 sind noch
+   nicht veröffentlicht – ohne sie lehnt Firestore Einheiten wie kg/l, Typ/"liegt in", MHD und
+   Behälter löschen ab ("Speichern fehlgeschlagen (permission-denied)"). Die neue Liste "Läuft bald ab"
+   nutzt dieselbe Abfrage wie die Suche (Collection-Group, schon in den Regeln freigegeben).
+2. **Lokal ansehen** (z.B. `npx http-server .`, Anmelden geht auf `localhost`): Leiste unten
+   → "Läuft ab"; im Behälter ☑ → Artikel ankreuzen → "Verschieben" → auf dem Android-Handy
+   "📷 Ziel-QR-Code scannen".
+3. **Dann mergen und pushen:** `git checkout main && git merge verbesserungen-2026-10-31 && git push`.
+   Danach auf den Handys 1–2× neu laden (Service Worker **v5**).
+
+**Entscheidungen zu den offenen Fragen aus Runde 2** (Details in [VORSCHLAEGE.md](VORSCHLAEGE.md)):
+A Übersicht bleibt oberste Ebene · B − unter 50 g/ml entfernt (mit Rückgängig) bleibt ·
+C Liste "läuft bald ab" → **umgesetzt** · D Ziel-QR im Umzug → **umgesetzt** · E Löschen-Regeln bleiben.
+
+**Umgesetzt:**
+
+- **Liste "Läuft bald ab"** (`index.html?liste=ablauf`; erreichbar über "⏰ Läuft ab" in der Leiste
+  unten und "⏰ Läuft bald ab" in der Übersicht): alle Artikel, deren MHD abgelaufen ist oder in
+  ≤ 3 Tagen abläuft, Schalter "≤ 7 Tage" (wird auf dem Gerät gemerkt). Sortiert nach Datum
+  (abgelaufene oben), mit "seit 2 Tagen"/"heute"/"in 3 Tagen", Menge und vollem Behälterpfad.
+  Antippen öffnet den Behälter und markiert den Artikel. Artikel werden mit derselben Logik wie die
+  Suche geladen (`loadAllItems` in app.js): erst beim Öffnen der Liste bzw. beim ersten Tippen in
+  der Suche, eine einzige Abfrage pro Seite – die Übersicht allein liest weiterhin keine Artikel.
+  Lesezugriffe: Öffnen der Liste liest alle Artikel einmal (wie eine Suche).
+  **Vorbereitet für die Einkaufsliste:** Listen laufen über `?liste=<name>` und `listView()` in
+  app.js; eine spätere Einkaufsliste wird dort als weiterer Eintrag ergänzt (z.B. `?liste=einkauf`),
+  die Ladelogik ist schon gemeinsam. Falls die Leiste unten zu voll wird, kann "Läuft ab" zu einem
+  Eintrag "Listen" werden.
+- **Umzugsmodus: Ziel per QR-Code scannen** – Knopf "📷 Ziel-QR-Code scannen" im
+  Verschieben-Dialog, nur wo der Browser `BarcodeDetector` und eine Kamera hat (v.a. Android/Chrome);
+  sonst bleibt der Dialog wie bisher. Der Scan **wählt das Ziel nur aus** (Hinweis "Ziel: Pfad"),
+  verschoben wird erst mit "Verschieben". Geprüft wird mit derselben Logik wie beim normalen Scan
+  (nur Links dieser App mit gültigem `?c=`); fremde Codes → Hinweis, Scanner sucht weiter.
+  Der eigene Behälter und **unbekannte Behälter werden abgelehnt** ("gibt es noch nicht – zuerst
+  öffnen bzw. anlegen"), es wird nichts angelegt. Manuelle Auswahl unverändert.
+- `firestore.rules` **unverändert** (keine Änderung nötig).
+
+**Tests (Stand Ende Runde 3, siehe [TESTS.md](TESTS.md)):** `npm test` 70/70, `npm run test:rules`
+53/53 (Emulator, portable Java 17), `npm run test:e2e` 20/20 (neu: 19 Liste "läuft bald ab" bei 360 px, 20 Ziel-QR mit
+gefälschtem BarcodeDetector/Kamera), `npm run test:e2e:cutout` ok, `npm run test:e2e:ocr`
+ok. Nicht getestet: echter QR-Scan auf einem Handy (BarcodeDetector nur gefälscht), echte
+Firebase-Datenbank.
+
+**Offen / Ideen:**
+
+- Einkaufsliste Küche/Kühlschrank (Entscheidung 5, "später").
+- Behoben: Escape schliesst nur noch das oberste Fenster (vorher bei offenem Scanner auch den
+  Verschieben-Dialog darunter).
 
 ## Runde 2 (2026-10-31, gleicher Branch `verbesserungen-2026-10-31`)
 
@@ -139,7 +194,7 @@ Die Person öffnet die App und meldet sich mit genau dieser Adresse an. Entferne
 unter der CSP). Nicht getestet: echte Firebase-Datenbank/Anmeldung, echte Handys (iPhone/Android),
 BarcodeDetector mit echten GS1-Codes, Texterkennung mit echten Packungsfotos.
 
-**Offene Fragen (Standardlösung ist umgesetzt, leicht änderbar):**
+**Offene Fragen (Standardlösung ist umgesetzt, leicht änderbar)** – beantwortet in Runde 3 (A–E, siehe oben):
 
 1. Übersicht zeigt nur die oberste Ebene (Räume und Behälter ohne Ort). Lieber alle Behälter
    eingerückt als Baum?
