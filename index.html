@@ -2,12 +2,23 @@
 <html lang="de">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<!--
+  Content-Security-Policy: erlaubt Skripte nur von hier, Firebase (gstatic/google) und der
+  Freistellungs-Bibliothek (jsdelivr/staticimgly, braucht WebAssembly). Eingeschleuste Inline-Skripte
+  würden blockiert. Falls nach einem Update etwas nicht mehr geht: Browser-Konsole zeigt
+  "Refused to …" mit der blockierten Adresse.
+-->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://www.google.com https://cdn.jsdelivr.net https://staticimgly.com 'wasm-unsafe-eval' blob:; connect-src 'self' https://*.googleapis.com https://www.google.com https://*.firebaseapp.com https://cdn.jsdelivr.net https://staticimgly.com data: blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; frame-src https://*.firebaseapp.com https://www.google.com https://recaptcha.google.com; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'" />
 <title>Vorrat</title>
 <meta name="theme-color" content="#2f6f4f" />
 <link rel="manifest" href="manifest.json" />
 <link rel="icon" href="icon.svg" />
 <link rel="apple-touch-icon" href="icon.svg" />
+<link rel="preconnect" href="https://firestore.googleapis.com" crossorigin />
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js" />
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js" />
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-title" content="Vorrat" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -16,20 +27,15 @@
 <body>
 <header class="app-header">
   <a href="index.html" id="home-link">🏠 Übersicht</a>
+  <span class="offline-badge" id="offline-badge" hidden>Offline</span>
   <a href="qr.html">QR-Codes drucken</a>
   <button type="button" id="logout-btn" class="link-btn" hidden>Abmelden</button>
 </header>
 <main id="app">
   <p class="empty-hint">Lade…</p>
 </main>
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script type="module" src="app.js"></script>
-<script>
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js').catch(() => {});
-    });
-  }
-</script>
+<script src="register-sw.js"></script>
 </body>
 </html>
