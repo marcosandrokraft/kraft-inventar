@@ -17,6 +17,8 @@ import {
   serverTimestamp,
   increment,
   writeBatch,
+  terminate,
+  clearIndexedDbPersistence,
   query,
   orderBy,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
@@ -556,6 +558,13 @@ function showLogout(user) {
   btn.title = user.email || "";
   btn.addEventListener("click", async () => {
     await signOut(auth);
+    // Offline-Kopie der Daten auf diesem Gerät löschen (wichtig auf fremden/geteilten Geräten).
+    try {
+      await terminate(db);
+      await clearIndexedDbPersistence(db);
+    } catch (err) {
+      console.warn("Offline-Speicher konnte nicht gelöscht werden:", err);
+    }
     location.reload();
   });
 }
