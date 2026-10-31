@@ -57,7 +57,8 @@ service cloud.firestore {
       return d.keys().hasOnly(['name', 'qty', 'unit', 'photo', 'mhd', 'updatedAt'])
         && validName(d)
         && d.qty is int && d.qty >= 1 && d.qty <= 100000
-        && d.unit in ['Stk', 'Packung', 'Flasche', 'Dose', 'Glas', 'g', 'kg', 'ml', 'l']
+        // unit darf fehlen (ältere Artikel; die App zeigt dann "Stk"), sonst nur bekannte Einheiten
+        && (!('unit' in d) || d.unit in ['Stk', 'Packung', 'Flasche', 'Dose', 'Glas', 'g', 'kg', 'ml', 'l'])
         && (!('mhd' in d) || validMhd(d.mhd))
         && (!('photo' in d) || validPhoto(d.photo))
         && (!('updatedAt' in d) || d.updatedAt is timestamp);
@@ -73,7 +74,8 @@ service cloud.firestore {
 
       match /items/{itemId} {
         allow read, delete: if isMember();
-        allow create: if isMember() && validId(itemId) && validItem(request.resource.data);
+        allow create: if isMember() && validId(itemId) && validItem(request.resource.data)
+          && 'unit' in request.resource.data; // neue Artikel immer mit Einheit
         allow update: if isMember() && itemId.size() <= 100 && validItem(request.resource.data);
       }
     }

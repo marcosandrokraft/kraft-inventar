@@ -688,6 +688,60 @@ test("16 MHD aus GS1-DataMatrix (BarcodeDetector-Fake, AI 17)", async () => {
   await t.done();
 });
 
+test("17 Auto-Anlegen nur von aussen (QR), nicht über App-Links; Löschen auf anderem Gerät", async () => {
+  const t = await open("index.html?c=neue-box&n=Neue%20Box", { seed: { "containers/keller": { name: "Keller" } } });
+  const { page } = t;
+  await waitUntil(page, () => document.getElementById("container-title").textContent === "Neue Box");
+  assertEqual(strip((await t.db())["containers/neue-box"]), { name: "Neue Box" }, "von aussen (QR) angelegt");
+
+  // Ein anderes Gerät löscht den Behälter, während er hier offen ist.
+  await page.evaluate(async () => {
+    const fs = await import("/vendor/firebase-10.14.1/firebase-firestore.js");
+    await fs.deleteDoc(fs.doc(fs.getFirestore(), "containers", "neue-box"));
+  });
+  await page.waitForSelector("text=inzwischen");
+  await page.waitForTimeout(200);
+  assert(!("containers/neue-box" in (await t.db())), "nicht wieder angelegt");
+  assertEqual(await page.locator("#add-item-form").count(), 0, "kein Formular mehr zum Hineinschreiben");
+
+  // Link innerhalb der App (z.B. Zurück, Zuletzt) → nicht anlegen
+  await page.click("text=Zur Übersicht");
+  await page.waitForSelector("#container-list a.card");
+  await page.evaluate(() => { location.href = "index.html?c=keller-2"; });
+  await page.waitForSelector("#items .empty-hint");
+  await page.waitForTimeout(300);
+  assert(!("containers/keller-2" in (await t.db())), "über App-Link nicht angelegt");
+  assert(!(await t.writes()).some((w) => w.path === "containers/keller-2"), "keine Schreibzugriffe");
+  await t.done();
+});
+
+test("18 Umzug: 'Alle' wählt nur gefilterte Artikel; Dialog über der Leiste", async () => {
+  const seed = { "containers/keller": { name: "Keller" }, "containers/garage": { name: "Garage" } };
+  for (let i = 1; i <= 9; i++) seed[`containers/keller/items/dose-${i}`] = { name: `Dose ${i}`, qty: 1, unit: "Dose" };
+  seed["containers/keller/items/milch"] = { name: "Milch", qty: 1, unit: "l" };
+  const t = await open("index.html?c=keller", { seed, viewport: { width: 360, height: 640 }, isMobile: true, hasTouch: true });
+  const { page } = t;
+  await page.waitForSelector('#items .card[data-id="milch"]');
+  await page.fill("#item-filter", "milch");
+  await page.click("#select-btn");
+  await page.click("#select-all");
+  assertEqual(await page.textContent("#select-count"), "1 ausgewählt", "nur der sichtbare Artikel");
+  await page.click("#select-move");
+  await page.waitForSelector('.photo-dialog [data-action="ok"]:not([disabled])');
+  const onTop = await page.evaluate(() => {
+    const btn = document.querySelector('.photo-dialog [data-action="close"]');
+    const r = btn.getBoundingClientRect();
+    const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return btn.contains(el) || el === btn;
+  });
+  assert(onTop, "Abbrechen-Knopf wird nicht von der Leiste verdeckt");
+  await page.click('.photo-dialog [data-action="ok"]');
+  await card(page, "milch").waitFor({ state: "detached" });
+  const db = await t.db();
+  assert(db["containers/garage/items/milch"] && db["containers/keller/items/dose-1"], "nur Milch verschoben");
+  await t.done();
+});
+
 let failed = 1;
 try {
   failed = await run(process.argv[2]);

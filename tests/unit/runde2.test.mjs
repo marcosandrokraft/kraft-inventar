@@ -205,6 +205,13 @@ describe("parseGs1Expiry (AI 17)", () => {
   it("Tag 00 = Monatsende", () => {
     assert.equal(parseGs1Expiry("010401234567890317270200"), "2027-02-28");
   });
+  it("AI 15 (Mindesthaltbarkeit) wenn kein AI 17, sonst AI 17 bevorzugt", () => {
+    assert.equal(parseGs1Expiry("]d201040123456789031527031210ABC"), "2027-03-12");
+    assert.equal(parseGs1Expiry("010401234567890315270101172703122"), "2027-03-12");
+    assert.equal(parseGs1Expiry("(01)04012345678903(15)270312"), "2027-03-12");
+    assert.equal(parseGs1Expiry("(01)04012345678903(15)270101(17)270312"), "2027-03-12");
+    assert.equal(parseGs1Expiry("https://id.example.com/01/04012345678903?15=270312"), "2027-03-12");
+  });
   it("Klartext mit Klammern", () => {
     assert.equal(parseGs1Expiry("(01)04012345678903(17)270312(10)ABC"), "2027-03-12");
   });

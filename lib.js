@@ -405,13 +405,15 @@ function gs1DateToIso(yymmdd) {
   return toIso(2000 + Number(yymmdd.slice(0, 2)), Number(yymmdd.slice(2, 4)), d === 0 ? null : d); // Tag 00 = Monatsende
 }
 
-// Verfallsdatum als "YYYY-MM-DD" oder null. Unterstützt: GS1 Digital Link
+// Verfallsdatum (AI 17) bzw., falls nicht vorhanden, Mindesthaltbarkeitsdatum (AI 15 "best before",
+// auf Lebensmitteln häufiger) als "YYYY-MM-DD", sonst null. Unterstützt: GS1 Digital Link
 // (https://…/01/<GTIN>…?17=YYMMDD, auch …/17/YYMMDD im Pfad), Klartext mit Klammern
 // "(01)…(17)270312" und rohe Element-Strings mit Gruppentrenner (FNC1 = \x1d) und
 // Symbologie-Präfix (]d2, ]Q3, ]C1). Unbekannte Strukturen → null (lieber nichts als Falsches).
 export function parseGs1Expiry(raw) {
   const text = String(raw ?? "").trim();
   if (!text) return null;
+  const pick = (found) => gs1DateToIso(found["17"] ?? found["15"] ?? "");
 
   if (/^https?:\/\//i.test(text)) {
     let url;
@@ -419,31 +421,36 @@ export function parseGs1Expiry(raw) {
     const segs = url.pathname.split("/").filter(Boolean);
     const gtinAt = segs.indexOf("01");
     if (gtinAt < 0 || !/^\d{8,14}$/.test(segs[gtinAt + 1] || "")) return null;
-    if (url.searchParams.has("17")) return gs1DateToIso(url.searchParams.get("17"));
-    const i = segs.indexOf("17", gtinAt + 2);
-    return i >= 0 ? gs1DateToIso(segs[i + 1] || "") : null;
+    const found = {};
+    for (let i = gtinAt + 2; i + 1 < segs.length; i += 2) found[segs[i]] = segs[i + 1];
+    for (const ai of ["15", "17"]) if (url.searchParams.has(ai)) found[ai] = url.searchParams.get(ai);
+    return pick(found);
   }
 
-  const bracket = text.match(/^\(\d{2,4}\).*?\(17\)(\d{6})/);
-  if (bracket) return gs1DateToIso(bracket[1]);
+  if (/^\(\d{2,4}\)/.test(text)) {
+    const found = {};
+    for (const m of text.matchAll(/\((1[57])\)(\d{6})/g)) found[m[1]] ??= m[2];
+    return pick(found);
+  }
 
   let s = text.replace(/^\][A-Za-z]\d/, "");
-  if (!/^(00|01|02|10|11|17)\d/.test(s)) return null;
+  if (!/^(00|01|02|10|11|15|17)\d/.test(s)) return null;
+  const found = {};
   while (s.length) {
     if (s[0] === GS) { s = s.slice(1); continue; }
     const ai = s.slice(0, 2);
     if (ai in GS1_FIXED) {
       const value = s.slice(2, 2 + GS1_FIXED[ai]);
-      if (value.length !== GS1_FIXED[ai] || !/^\d+$/.test(value)) return null;
-      if (ai === "17") return gs1DateToIso(value);
+      if (value.length !== GS1_FIXED[ai] || !/^\d+$/.test(value)) break;
+      if (ai === "17" || ai === "15") found[ai] ??= value;
       s = s.slice(2 + GS1_FIXED[ai]);
     } else if (GS1_VARIABLE.has(ai)) {
       const end = s.indexOf(GS, 2);
-      if (end < 0) return null; // letztes Feld, AI 17 kam nicht vor
+      if (end < 0) break; // letztes Feld
       s = s.slice(end + 1);
     } else {
-      return null;
+      break; // unbekannter AI: Rest nicht deuten
     }
   }
-  return null;
+  return pick(found);
 }

@@ -404,6 +404,11 @@ describe("firestore.rules", function () {
         await assertFails(member().doc("containers/keller/items/milch").set(withMhd(mhd)), String(mhd));
       }
     });
+    it("älterer Artikel ohne Einheit: +/- und MHD möglich", async () => {
+      await seed(async (sdb) => sdb.doc("containers/keller/items/alt").set({ name: "Alt", qty: 2 }));
+      await assertSucceeds(member().doc("containers/keller/items/alt").update({ qty: FieldValue.increment(1), mhd: "2027-01-01" }));
+      await assertFails(member().doc("containers/keller/items/alt").update({ unit: "Kiste" }));
+    });
     it("Nicht-Mitglied darf kein MHD setzen", async () => {
       await assertFails(member("mallory@example.com", "mallory").doc("containers/keller/items/reis").update({ mhd: "2027-01-01" }));
     });

@@ -649,10 +649,16 @@ async function moveItems(fromId, entries, target) {
       return { itemId, item, targetItemId, dst, existing: existing.exists() ? existing.data() : null };
     }));
     const batch = writeBatch(db);
-    const undo = [];
+    const undoTarget = [];
+    const undoSource = [];
     const skipped = [];
     const movedPlans = [];
+    const usedTargets = new Set();
     for (const p of plans) {
+      if (usedTargets.has(p.targetItemId)) {
+        skipped.push(`"${p.item.name}" (gleicher Name wie ein anderer ausgewählter Artikel)`);
+        continue;
+      }
       const unit = UNITS.includes(p.item.unit) ? p.item.unit : "Stk";
       const qty = parseQty(p.item.qty);
       const src = itemRef(fromId, p.itemId);
@@ -663,26 +669,34 @@ async function moveItems(fromId, entries, target) {
           continue;
         }
         const delta = Math.max(0, Math.min(qty, MAX_QTY - (t.qty || 0)));
+        if (delta < qty) {
+          skipped.push(`"${t.name}" (Menge im Ziel zu gross)`);
+          continue;
+        }
         const upd = { qty: increment(delta), updatedAt: serverTimestamp() };
         const back = { qty: increment(-delta), updatedAt: serverTimestamp() };
         if (!isSafePhoto(t.photo) && isSafePhoto(p.item.photo)) { upd.photo = p.item.photo; back.photo = deleteField(); }
         if (!isValidIsoDate(t.mhd) && isValidIsoDate(p.item.mhd)) { upd.mhd = p.item.mhd; back.mhd = deleteField(); }
         batch.update(p.dst, upd);
-        undo.push((b) => b.update(p.dst, back));
+        undoTarget.push((b) => b.update(p.dst, back));
       } else {
         const data = itemBackup(p.item);
         data.unit = unit;
         batch.set(p.dst, data);
-        undo.push((b) => b.delete(p.dst));
+        undoTarget.push((b) => b.delete(p.dst));
       }
       batch.delete(src);
+      usedTargets.add(p.targetItemId);
+      // Ältere IDs (nicht im App-Format) dürfen laut Regeln nicht neu angelegt werden → unter der
+      // neuen ID wiederherstellen.
       const backup = itemBackup(p.item);
-      undo.push((b) => b.set(src, backup));
+      const restoreRef = isValidId(p.itemId) ? src : itemRef(fromId, p.targetItemId);
+      undoSource.push((b) => b.set(restoreRef, backup));
       movedPlans.push(p);
     }
     const moved = movedPlans.length;
     if (skipped.length) {
-      alert(`Nicht verschoben (andere Einheit im Ziel "${target.name}"): ${skipped.join(", ")}. Bitte dort zuerst anpassen.`);
+      alert(`Nicht verschoben nach "${target.name}" (andere Einheit o.ä.): ${skipped.join(", ")}. Bitte dort zuerst anpassen.`);
     }
     if (!moved) return;
     background(batch.commit(), "Verschieben");
@@ -691,11 +705,16 @@ async function moveItems(fromId, entries, target) {
     toast(`${label} → ${target.name}`, {
       ms: 6000,
       actions: [
-        { label: "Öffnen", fn: () => { location.href = `index.html?c=${encodeURIComponent(target.id)}${hash}`; } },
+        { label: "Öffnen", fn: () => { setTimeout(() => { location.href = `index.html?c=${encodeURIComponent(target.id)}${hash}`; }, 300); } },
         { label: "Rückgängig", fn: () => {
-          const b = writeBatch(db);
-          undo.forEach((op) => op(b));
-          background(b.commit(), "Rückgängig");
+          // Zwei Batches: Die Quelle wird auch dann wiederhergestellt, wenn das Ziel inzwischen
+          // geändert wurde (z.B. jemand hat dort etwas entnommen).
+          const src = writeBatch(db);
+          undoSource.forEach((op) => op(src));
+          background(src.commit(), "Rückgängig");
+          const dst = writeBatch(db);
+          undoTarget.forEach((op) => op(dst));
+          background(dst.commit(), "Rückgängig im Ziel");
           toast("Verschieben rückgängig gemacht");
         } },
       ],
@@ -707,6 +726,30 @@ async function moveItems(fromId, entries, target) {
 }
 
 // --- QR-Scanner in der App (Android/Chrome: BarcodeDetector; sonst normale Kamera-App benutzen) ---
+
+const SCANNED_KEY = "scannedContainer";
+
+// Darf ein fehlender Behälter automatisch angelegt werden? Nur wenn der Link von aussen kommt
+// (QR-Code mit der Kamera-App, NFC, Lesezeichen) oder gerade mit dem In-App-Scanner gescannt wurde –
+// nicht bei Links innerhalb der App (Zurück-Taste, "Zuletzt", veraltete Übersicht, Suchtreffer).
+// Sonst würde ein gerade gelöschter Behälter sofort wieder angelegt.
+function mayAutoCreate(id) {
+  let scanned = null;
+  try {
+    scanned = sessionStorage.getItem(SCANNED_KEY);
+    sessionStorage.removeItem(SCANNED_KEY);
+  } catch {}
+  if (scanned === id) {
+    forgetDeleted(id);
+    return true;
+  }
+  if (deletedIds().includes(id)) return false;
+  try {
+    return !document.referrer || new URL(document.referrer).origin !== location.origin;
+  } catch {
+    return true;
+  }
+}
 
 const canScan = "BarcodeDetector" in window && !!navigator.mediaDevices?.getUserMedia;
 
@@ -746,6 +789,7 @@ async function openScanner() {
             stop();
             close();
             const name = new URL(code.rawValue).searchParams.get("n");
+            try { sessionStorage.setItem(SCANNED_KEY, id); } catch {}
             location.href = containerUrl(location.href, id, name);
             return;
           }
@@ -885,6 +929,24 @@ function rememberRecent(id, name) {
   const list = loadRecent().filter((r) => r.id !== id);
   list.unshift({ id, name: String(name).slice(0, MAX_NAME) });
   storageSet(RECENT_KEY, JSON.stringify(list.slice(0, RECENT_MAX)));
+}
+
+// Auf diesem Gerät gelöschte Behälter: nie automatisch neu anlegen (auch nicht per altem Link).
+// Ein bewusst mit dem In-App-Scanner gescannter QR-Code legt ihn trotzdem wieder an.
+const DELETED_KEY = "deletedContainers";
+function deletedIds() {
+  try {
+    const list = JSON.parse(storageGet(DELETED_KEY) || "[]");
+    return Array.isArray(list) ? list.filter((x) => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+function rememberDeleted(id) {
+  storageSet(DELETED_KEY, JSON.stringify([id, ...deletedIds().filter((x) => x !== id)].slice(0, 50)));
+}
+function forgetDeleted(id) {
+  storageSet(DELETED_KEY, JSON.stringify(deletedIds().filter((x) => x !== id)));
 }
 
 function forgetRecent(id) {
@@ -1140,6 +1202,7 @@ function renderOverview() {
 // --- Behälter bearbeiten: Name, Typ, "liegt in", löschen ---
 
 function showContainerSettings(id, onDeleted) {
+  const canDelete = isValidId(id); // ältere IDs könnten nach dem Löschen nicht wiederhergestellt werden
   const c = allContainers.get(id) || { name: id };
   const options = parentOptions(id, allContainers).filter((o) => o.id !== id);
   const { overlay, close } = openDialog(`
@@ -1158,7 +1221,7 @@ function showContainerSettings(id, onDeleted) {
       <button type="button" data-action="close" class="secondary">Abbrechen</button>
     </div>
     <div class="photo-actions">
-      <button type="button" data-action="delete" class="danger">🗑 Behälter löschen</button>
+      ${canDelete ? `<button type="button" data-action="delete" class="danger">🗑 Behälter löschen</button>` : ""}
     </div>
     <small class="muted" id="cs-hint">Der QR-Code bleibt beim Umbenennen und Verschieben gültig.</small>
   `);
@@ -1184,7 +1247,7 @@ function showContainerSettings(id, onDeleted) {
     }, { merge: true }), "Speichern");
     toast("Gespeichert");
   });
-  overlay.querySelector('[data-action="delete"]').addEventListener("click", async () => {
+  overlay.querySelector('[data-action="delete"]')?.addEventListener("click", async () => {
     const hint = overlay.querySelector("#cs-hint");
     const kids = childContainers(id, allContainers);
     if (kids.length) {
@@ -1308,10 +1371,17 @@ function renderContainer(id) {
     titleEl.textContent = id;
   }
 
-  let mayCreate = true;
+  let mayCreate = mayAutoCreate(id);
+  let existed = false;
   onSnapshot(doc(db, "containers", id), (snap) => {
     if (deleted) return;
+    if (!snap.exists() && existed && !snap.metadata.fromCache && !snap.metadata.hasPendingWrites) {
+      // Auf einem anderen Gerät/Tab gelöscht → hier nicht weiter hineinschreiben.
+      showDeleted(null);
+      return;
+    }
     if (snap.exists()) {
+      existed = true;
       mayCreate = false;
       containerName = snap.data().name || id;
       rememberRecent(id, containerName);
@@ -1366,22 +1436,32 @@ function renderContainer(id) {
     const backup = { name: c.name || containerName, createdAt: serverTimestamp() };
     if (c.type) backup.type = c.type;
     if (c.parent) backup.parent = c.parent;
+    background(deleteDoc(doc(db, "containers", id)), "Löschen");
+    showDeleted(backup);
+  }
+
+  // Ansicht "wurde gelöscht" – mit Rückgängig, wenn hier gelöscht (backup), sonst nur Hinweis.
+  function showDeleted(backup) {
     deleted = true;
     forgetRecent(id);
-    background(deleteDoc(doc(db, "containers", id)), "Löschen");
-    const parent = c.parent && allContainers.has(c.parent) ? c.parent : null;
+    rememberDeleted(id);
+    const c = allContainers.get(id) || {};
+    const parent = c.parent && c.parent !== id && allContainers.has(c.parent) ? c.parent : null;
     const back = parent ? `index.html?c=${encodeURIComponent(parent)}` : "index.html";
     main.innerHTML = `
-      <p class="empty-hint">„<span id="deleted-name"></span>“ wurde gelöscht.</p>
+      <p class="empty-hint">„<span id="deleted-name"></span>“ wurde ${backup ? "" : "inzwischen (auf einem anderen Gerät) "}gelöscht.</p>
       <div class="photo-actions">
-        <button type="button" id="undo-delete">Rückgängig</button>
+        ${backup ? `<button type="button" id="undo-delete">Rückgängig</button>` : ""}
         <a class="button-link" href="${escapeHtml(back)}">${parent ? "Zurück" : "Zur Übersicht"}</a>
       </div>`;
-    document.getElementById("deleted-name").textContent = backup.name;
+    document.getElementById("deleted-name").textContent = backup ? backup.name : containerName;
     document.title = "Gelöscht – Vorrat";
+    if (!backup) return;
     document.getElementById("undo-delete").addEventListener("click", () => {
       background(setDoc(doc(db, "containers", id), backup), "Wiederherstellen");
-      location.href = `index.html?c=${encodeURIComponent(id)}`;
+      forgetDeleted(id);
+      // Kurz warten, damit der Schreibvorgang sicher im Offline-Speicher liegt, bevor die Seite neu lädt.
+      setTimeout(() => { location.href = `index.html?c=${encodeURIComponent(id)}`; }, 400);
     });
     toast(`"${backup.name}" gelöscht`, {
       ms: 8000,
@@ -1401,7 +1481,23 @@ function renderContainer(id) {
       toast(`Fehler (${err.code || err.message})`, 4000);
       return;
     }
-    const newId = uniqueContainerId(name, isValidId(id) ? id : "", (cid) => allContainers.has(cid));
+    // Die lokale Liste kann veraltet sein (anderes Gerät, offline) → ID zusätzlich einzeln prüfen,
+    // damit nie ein fremder Behälter überschrieben wird.
+    const seenTaken = new Set();
+    let newId = "";
+    for (let attempt = 0; attempt < 5; attempt++) {
+      newId = uniqueContainerId(name, isValidId(id) ? id : "", (cid) => allContainers.has(cid) || seenTaken.has(cid));
+      if (!newId) break;
+      let exists = false;
+      try {
+        exists = (await getDoc(doc(db, "containers", newId))).exists();
+      } catch {
+        exists = false; // offline ohne Cache: lokale Prüfung muss reichen
+      }
+      if (!exists) break;
+      seenTaken.add(newId);
+      newId = "";
+    }
     if (!newId) {
       toast("Bitte einen Namen mit Buchstaben oder Ziffern eingeben", 3000);
       return;
@@ -1430,8 +1526,8 @@ function renderContainer(id) {
   document.getElementById("select-btn").addEventListener("click", () => setSelecting(!selecting));
   document.getElementById("select-cancel").addEventListener("click", () => setSelecting(false));
   document.getElementById("select-all").addEventListener("click", () => {
-    const all = [...currentItems.keys()];
-    if (selected.size === all.length) selected.clear();
+    const all = visibleIds; // nur sichtbare (Filter beachten)
+    if (all.every((k) => selected.has(k))) all.forEach((k) => selected.delete(k));
     else all.forEach((k) => selected.add(k));
     renderItems();
   });
@@ -1443,6 +1539,7 @@ function renderContainer(id) {
 
   const itemsQuery = query(collection(db, "containers", id, "items"), orderBy("name"));
   let lastSnap = null;
+  let visibleIds = [];
   let highlightPending = decodeURIComponent((location.hash.match(/^#i=(.+)$/) || [])[1] || "");
 
   function renderItems() {
@@ -1455,6 +1552,7 @@ function renderContainer(id) {
     updateSelectBar();
     filterInput.hidden = snap.size < FILTER_THRESHOLD && !filterInput.value;
 
+    visibleIds = [];
     if (snap.empty) {
       itemsEl.innerHTML = `<p class="empty-hint">${childrenEl.hidden ? "Leer – füge unten etwas hinzu." : "Keine Artikel direkt hier."}</p>`;
       return;
@@ -1468,6 +1566,7 @@ function renderContainer(id) {
       }
     }
     itemsEl.innerHTML = "";
+    visibleIds = entries.map((e) => e.id);
     for (const item of entries) {
       const itemId = item.id;
       if (selecting) {
@@ -1613,6 +1712,9 @@ function setQty(containerId, itemId, item) {
 // Entfernen ohne Rückfrage, dafür mit "Rückgängig" (stellt Name, Menge, Einheit, Foto und MHD wieder her).
 function removeItem(containerId, itemId, item) {
   const ref = itemRef(containerId, itemId);
+  // Ältere IDs (nicht im App-Format) dürfen laut Regeln nicht neu angelegt werden.
+  const slug = slugify(item.name || "");
+  const restoreRef = isValidId(itemId) || !isValidId(slug) ? ref : itemRef(containerId, slug);
   const backup = itemBackup(item);
   background(deleteDoc(ref), "Entfernen");
   toast(`"${item.name}" entfernt`, {
@@ -1620,7 +1722,7 @@ function removeItem(containerId, itemId, item) {
     action: {
       label: "Rückgängig",
       fn: () => {
-        background(setDoc(ref, backup), "Wiederherstellen");
+        background(setDoc(restoreRef, backup), "Wiederherstellen");
         toast(`"${item.name}" wiederhergestellt`);
       },
     },
