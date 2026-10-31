@@ -4,6 +4,9 @@
 
 `tests/unit/lib.test.mjs` testet die reine Logik aus `lib.js` (IDs/slugify, HTML-Escaping,
 Foto-Prüfung, Mengen addieren, Suche, QR-Links/Scanner, Zuschnitt nach Freistellung).
+`tests/unit/runde2.test.mjs`: Einheiten, Schrittweite ±50, Pfad/Unterbehälter/Zyklen, eindeutige
+IDs für Unterbehälter, MHD (Schnellwahl, Status, Sommerzeit), Datumserkennung aus OCR-Text,
+GS1-Verfallsdatum (AI 17, ersatzweise Mindesthaltbarkeit AI 15) aus DataMatrix-Rohtext, Klammer-Schreibweise und Digital Link.
 Braucht nur Node.js (getestet mit v16.16.0), kein Java, kein Netz:
 
 ```sh
@@ -15,7 +18,8 @@ npm test
 
 Die Datei `tests/rules/rules.test.mjs` prüft `firestore.rules` gegen den lokalen
 Firestore-Emulator (Zugriff nur für Mitglieder, Validierung von Namen/Menge/Einheit/Foto,
-gültige IDs, `increment`, Collection-Group-Suche, Verschieben per Batch).
+gültige IDs, `increment`, Collection-Group-Suche, Verschieben per Batch; Runde 2: `type`/`parent`
+am Behälter, Behälter löschen, `mhd` am Artikel, neue Einheiten, Umzug mehrerer Artikel per Batch).
 
 ### Voraussetzungen
 
@@ -68,7 +72,14 @@ authenticated“ beim Start kann ignoriert werden. Testnutzer verwenden nur Plat
 In-Memory-Fakes ersetzt (`tests/e2e/fake-firebase/`), Anfragen an Google/Firebase werden blockiert
 und als Fehler gewertet. Geprüft: Übersicht und Suche, +/− per increment ohne Foto, Rückgängig,
 Menge addieren, Verschieben, XSS, keine CSP-Verletzungen, QR lokal, Handy-Layout (360 px, Knöpfe ≥ 44 px),
-Doppeltipp, ungültige Links.
+Doppeltipp, ungültige Links; Runde 2 (Tests 10–16): Einheiten/±50, Hierarchie (oberste Ebene, Pfad,
+Unterbehälter, "liegt in" ohne Kreise), Behälter löschen nur wenn leer + Rückgängig, Leiste unten
+und "zuletzt geöffnet", Umzugsmodus + Rückgängig, MHD (Schnellwahl, Kalender, entfernen,
+Kamera mit gefälschter Texterkennung bzw. gefälschtem BarcodeDetector – immer mit Bestätigung);
+Tests 17–18: Auto-Anlegen nur über Links von aussen, Löschen auf anderem Gerät, "Alle" beachtet den
+Filter, Dialoge liegen über der Leiste unten.
+Firebase wird seit Runde 2 aus `vendor/firebase-10.14.1/` geladen; die Tests ersetzen genau diese
+Dateien durch die Fakes, jede Anfrage an gstatic.com gilt als Fehler.
 
 ```sh
 npm run test:e2e
@@ -79,4 +90,12 @@ Content-Security-Policy aus `index.html` funktioniert:
 
 ```sh
 npm run test:e2e:cutout
+```
+
+Optional, lädt ca. 4 MB von cdn.jsdelivr.net: prüft, ob die Texterkennung fürs MHD (`ocr.js`,
+tesseract.js 7.0.0) unter der CSP aus `index.html` läuft und aus einem gezeichneten Etikett
+"MHD 12.03.27" das richtige Datum vorschlägt (mit `--ohne-unsafe-eval` auch ohne 'unsafe-eval'):
+
+```sh
+npm run test:e2e:ocr
 ```

@@ -63,7 +63,25 @@ die Regeln in der Konsole erneut veröffentlichen.
 - Menge über +/− anpassen oder die Zahl antippen und direkt eingeben; bei 0 wird der Artikel entfernt.
 - 🗑 entfernt einen Artikel sofort – unten erscheint kurz "Rückgängig".
 - Artikelnamen antippen → Details: Foto, **Verschieben** in einen anderen Behälter, Entfernen.
-- ✏️ neben dem Behälternamen benennt ihn um (der QR-Code bleibt gültig).
+- ✏️ neben dem Behälternamen: umbenennen, Typ (Raum/Schrank/Fach/Box, optional), **"liegt in"**
+  (z.B. Gemüsefach liegt im Kühlschrank, der in der Küche steht) und **löschen** (nur wenn leer,
+  mit Rückgängig). Der QR-Code bleibt gültig. Ebenen dürfen fehlen: eine Box direkt in einem Raum
+  oder ganz ohne Ort ist erlaubt.
+- Im Behälter oben der Pfad (Küche › Kühlschrank), darunter "Darin" mit den Unterbehältern;
+  ganz unten "+ Behälter hier hineinlegen". Die Übersicht zeigt nur die oberste Ebene, die Suche
+  zeigt den ganzen Pfad.
+- Einheiten: Stk, Packung, Flasche, Dose, Glas, g, kg, ml, l. Bei g und ml ändern +/− um 50.
+- **MHD** (optional): Artikel antippen → 📅 MHD → +3 Tage, +1 Woche, +1 Monat, Kalender oder
+  entfernen. "Läuft bald ab" (≤ 3 Tage) wird orange, "abgelaufen" rot markiert.
+  **Experiment** "Datum mit Kamera lesen": Foto der Packung → liest zuerst einen GS1-Code
+  (DataMatrix/QR mit Verfallsdatum, nur wo der Browser BarcodeDetector kann, v.a. Android), sonst
+  Texterkennung (tesseract.js, lädt beim ersten Mal ca. 4 MB). **Unzuverlässig** – Prägedruck,
+  Spiegelungen, gewölbte Dosen und kleine Schrift werden oft falsch oder gar nicht erkannt. Der
+  Vorschlag wird nie automatisch übernommen, du bestätigst ihn immer.
+- ☑ neben dem Behälternamen: **Umzugsmodus** – mehrere Artikel ankreuzen und auf einmal
+  verschieben (mit Rückgängig).
+- Leiste unten: Übersicht, Suchen, Scannen (Android/Chrome), **Zuletzt** (zuletzt geöffnete
+  Behälter, nur auf diesem Gerät gespeichert).
 - Ohne Netz: Zuletzt angesehene Inhalte bleiben sichtbar, Änderungen werden später übertragen
   ("Offline" oben). Abmelden löscht die Offline-Kopie auf dem Gerät.
 - Vorschaubild links am Artikel: ohne Foto → 📷 antippen fügt eins hinzu; mit Foto → Grossansicht
@@ -78,14 +96,17 @@ die Regeln in der Konsole erneut veröffentlichen.
     Browser zwischengespeichert, ein Foto dauert dann nur noch einige Sekunden.
   - Klappt die Freistellung mal nicht (z.B. sehr altes Handy/Browser ohne WebAssembly), wird automatisch
     das normale (nicht freigestellte) Foto gespeichert, statt dass gar nichts passiert.
-- Über "🏠 Übersicht" (oben) siehst du alle angelegten Behälter und kannst auch dort neue anlegen
+- Über "🏠 Übersicht" (oben oder unten) siehst du alle Behälter der obersten Ebene und kannst auch dort neue anlegen
   (z.B. falls du mal ohne QR-Code schnell etwas eintragen willst).
 - "Zum Home-Bildschirm hinzufügen" (iOS/Android-Browser-Menü) macht daraus ein App-Icon ohne Appstore.
 
 ## Dateien
 
 - `index.html` / `app.js` – Haupt-App (Übersicht + Behälter-Ansicht je nach `?c=`-Parameter)
-- `lib.js` – reine Logik (IDs, Suche, Mengen, Zuschnitt), getestet in `tests/unit`
+- `lib.js` – reine Logik (IDs, Suche, Mengen, Zuschnitt, Pfade, MHD, Datums-/GS1-Erkennung),
+  getestet in `tests/unit`
+- `ocr.js` – Experiment Texterkennung fürs MHD (lädt tesseract.js erst bei Bedarf)
+- `vendor/firebase-10.14.1/` – Firebase-Bibliotheken, selbst gehostet (Apache-2.0, siehe README.txt dort)
 - `qr.html` / `qr.js` / `vendor/qrcode-generator-1.4.4.js` – QR-Code-Druckbogen
 - `register-sw.js` – registriert den Service Worker
 - `tests/`, `package.json`, `firebase.json` – nur für Tests (siehe [TESTS.md](TESTS.md)), die App

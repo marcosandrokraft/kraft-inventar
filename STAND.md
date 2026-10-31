@@ -1,6 +1,6 @@
 # Aktueller Stand
 
-Letzter Stand: 2026-10-31 (Branch `verbesserungen-2026-10-31`, noch nicht gemergt). Diese Datei fasst den Fortschritt zusammen, damit man (auch mit einer
+Letzter Stand: 2026-10-31, Runde 2 (Branch `verbesserungen-2026-10-31`, noch nicht gemergt). Diese Datei fasst den Fortschritt zusammen, damit man (auch mit einer
 neuen Claude-Session auf einem anderen Gerät) nahtlos weitermachen kann.
 
 **Die App läuft:** https://marcosandrokraft.github.io/kraft-inventar/ – mit Anmeldung per E-Mail-Link,
@@ -62,6 +62,94 @@ Die Person öffnet die App und meldet sich mit genau dieser Adresse an. Entferne
 - Erledigt am 2026-10-31: +/− per `increment()`, gleicher Artikel addiert die Menge.
 - Weitere Ideen, die eine Entscheidung brauchen: [VORSCHLAEGE.md](VORSCHLAEGE.md).
 
+## Runde 2 (2026-10-31, gleicher Branch `verbesserungen-2026-10-31`)
+
+**Was du tun musst (in dieser Reihenfolge):**
+
+1. **Regeln veröffentlichen – diesmal ZUERST, vor dem Mergen/Pushen:** Firebase-Konsole → Firestore
+   Database → Regeln → kompletten Inhalt von [firestore.rules](firestore.rules) einfügen →
+   Veröffentlichen. Ohne die neuen Regeln lehnt Firestore alles Neue ab (Einheiten wie kg/l/Flasche,
+   Typ und "liegt in", MHD, Behälter löschen) – die App zeigt dann "Speichern fehlgeschlagen
+   (permission-denied)". Die neuen Regeln akzeptieren alle alten Daten und die alte App-Version.
+   (Die Regeln wurden **nicht** automatisch deployt.)
+2. **Lokal ansehen** (siehe Punkt 1 der Session unten), besonders: Behälter verschachteln,
+   Leiste unten, MHD setzen, auf dem Android-Handy "Datum mit Kamera lesen" an einer Packung.
+3. **Mergen und pushen** wie unten beschrieben. Danach auf den Handys 1–2× neu laden
+   (Service Worker v4).
+4. Offene Fragen unten beantworten.
+
+**Umgesetzt** (Details in [README.md](README.md) unter "Benutzung"):
+
+- **Hierarchie:** Behälter haben optional einen Typ (Raum/Schrank/Fach/Box) und "liegt in"
+  (beliebiger anderer Behälter, jederzeit änderbar über ✏️). Ebenen dürfen fehlen, ein Behälter
+  ohne Ort ist erlaubt. Kreise werden verhindert (Auswahl bietet sich selbst und eigene
+  Unterbehälter gar nicht an; kaputte Daten mit Kreis hängen die App nicht auf). Pfad oben
+  ("Küche › Kühlschrank"), Unterbehälter unter "Darin", neue Unterbehälter über "+ Behälter hier
+  hineinlegen". Die Übersicht zeigt nur die oberste Ebene. Die Suche zeigt den vollen Pfad,
+  findet auch Behälter selbst, und "küche salz" findet Salz irgendwo in der Küche.
+  Datenmodell: Felder `type` und `parent` am Behälter, beide optional – keine Migration nötig.
+  Gibt es den Namen schon (z.B. zweimal "Fach 1"), bekommt der neue Unterbehälter die ID
+  `<elternbehälter>-fach-1`.
+- **Einheiten:** Stk, Packung, Flasche, Dose, Glas, g, kg, ml, l. Ältere Artikel ganz ohne Einheit
+  lassen sich jetzt auch ändern (+/−, MHD); neue Artikel brauchen weiterhin eine Einheit. "Stück" ist das bestehende "Stk"
+  (bewusst nicht doppelt, alte Artikel behalten ihre Einheit).
+- **±50 bei g und ml**, sonst ±1. Fällt die Menge dadurch auf 0 oder darunter (z.B. 30 g − 50),
+  wird der Artikel wie bisher entfernt – mit "Rückgängig".
+- **Behälter löschen** (✏️ → "Behälter löschen"): nur ohne Artikel und ohne Unterbehälter,
+  danach "Rückgängig" (stellt Name, Typ und Ort wieder her). Hat ein anderes Gerät den Behälter
+  gerade offen, zeigt es "wurde inzwischen gelöscht" statt weiter hineinzuschreiben.
+  **Geändert:** Ein fehlender Behälter wird nur noch automatisch angelegt, wenn der Link von aussen
+  kommt (QR-Code mit der Kamera-App, NFC, Lesezeichen) oder mit dem In-App-Scanner gescannt wurde –
+  nicht mehr über Links innerhalb der App (Zurück-Taste, "Zuletzt", veraltete Übersicht). Auf dem
+  Gerät, auf dem gelöscht wurde, legt auch ein alter Link ihn nicht wieder an (nur ein erneuter Scan).
+  Behälter mit älteren IDs (nicht im App-Format) haben keinen Löschen-Knopf, weil die Regeln sie
+  nicht wiederherstellen könnten.
+- **MHD** (Feld `mhd`, "YYYY-MM-DD", optional): Details → 📅 MHD → +3 Tage / +1 Woche / +1 Monat /
+  Kalender / entfernen; Markierung orange (≤ 3 Tage) bzw. rot (abgelaufen), auch in der Suche.
+  Verschieben und Rückgängig nehmen das MHD mit.
+  **Experiment "Datum mit Kamera lesen":** Foto → erst GS1-Code (DataMatrix/QR/GS1 Digital Link;
+  nur wo der Browser `BarcodeDetector` hat, also v.a. Android/Chrome; Verfallsdatum AI 17, sonst
+  Mindesthaltbarkeit AI 15), sonst Texterkennung mit tesseract.js 7.0.0 (exakt versioniert von cdn.jsdelivr.net, erst beim
+  Klick geladen, ca. 4 MB beim ersten Mal, läuft im Browser). Erkennt z.B. 12.03.27, 12/03/2027,
+  03.2027 (= Monatsende). **Ehrlich: unzuverlässig** – auf echten Packungen (Prägedruck,
+  Spiegelung, Rundungen) oft falsch oder nichts. Der Vorschlag wird nie automatisch gespeichert.
+  Getestet nur mit einem am Computer gezeichneten Etikett (`npm run test:e2e:ocr`), nicht mit
+  echten Packungen und nicht auf echten Handys.
+- **Umzugsmodus:** ☑ im Behälter → Artikel ankreuzen (oder "Alle") → "Verschieben" → Ziel mit Pfad
+  wählen. Alles in einem Batch; gibt es im Ziel denselben Artikel mit anderer Einheit, wird er
+  übersprungen und gemeldet (ebenso, wenn die Menge im Ziel das Maximum überschreiten würde). "Rückgängig" im Hinweis macht den ganzen Umzug rückgängig (gilt jetzt
+  auch beim Verschieben eines einzelnen Artikels).
+- **Leiste unten:** Übersicht · Suchen · Scannen · Zuletzt. "Zuletzt" = die 6 zuletzt geöffneten
+  Behälter, nur auf diesem Gerät (localStorage), zusätzlich als Chips oben in der Übersicht.
+  Scannen geht in der App nur mit Android/Chrome; sonst Hinweis "mit der Kamera-App scannen".
+- **Firebase selbst gehostet** (`vendor/firebase-10.14.1/`, Apache-2.0, Herkunft/Hashes in
+  `README.txt` dort): **gratis** (GitHub Pages, ~720 KB mehr im Repo), **gleich schnell** (gstatic
+  und GitHub Pages liefern beide gzip, ~175 KB; ein Verbindungsaufbau zu gstatic entfällt; danach
+  kommt ohnehin alles aus dem Service-Worker-Cache), **sicherer** (Firebase-Code kommt nur noch
+  aus dem eigenen Repo; `www.gstatic.com` und `www.google.com` sind aus `script-src` der CSP
+  entfernt). Nachteil: Updates von Hand (3 Schritte in der README.txt) – war mit fester
+  Versionsnummer aber vorher auch schon so.
+  **Achtung App Check:** Falls du App Check (reCAPTCHA v3) einschaltest, in `index.html` in der
+  CSP bei `script-src` wieder `https://www.google.com https://www.gstatic.com` ergänzen (steht
+  auch als Kommentar dort).
+
+**Tests (Stand Ende Runde 2, siehe [TESTS.md](TESTS.md)):** `npm test` 59/59, `npm run test:rules`
+53/53 (Emulator, portable Java 17), `npm run test:e2e` 18/18 (Edge headless, Firebase gefälscht),
+`npm run test:e2e:cutout` ok, `npm run test:e2e:ocr` ok (gezeichnetes Etikett, echtes tesseract.js
+unter der CSP). Nicht getestet: echte Firebase-Datenbank/Anmeldung, echte Handys (iPhone/Android),
+BarcodeDetector mit echten GS1-Codes, Texterkennung mit echten Packungsfotos.
+
+**Offene Fragen (Standardlösung ist umgesetzt, leicht änderbar):**
+
+1. Übersicht zeigt nur die oberste Ebene (Räume und Behälter ohne Ort). Lieber alle Behälter
+   eingerückt als Baum?
+2. g/ml: − unter 50 entfernt den Artikel (mit Rückgängig). Lieber auf 1 g stehen bleiben?
+3. "Läuft bald ab" = heute bis in 3 Tagen. Soll es eine Liste "läuft bald ab" (z.B. für den
+   Kühlschrank) in der Übersicht geben? Das würde gut zur späteren Einkaufsliste passen.
+4. Umzugsmodus: Ziel wird aus einer Liste gewählt. Zusätzlich "Ziel-QR-Code scannen" (Android)?
+5. Löschen eines Behälters ist für alle Mitglieder erlaubt (Regeln), "nur wenn leer" prüft die App.
+   Reicht das, oder sollen die Regeln Löschen zusätzlich an eine Bedingung knüpfen?
+
 ## Session 2026-10-31: Verbesserungen (Branch `verbesserungen-2026-10-31`)
 
 **Was du tun musst (in dieser Reihenfolge):**
@@ -106,6 +194,6 @@ index.html ergänzen (oder die Zeile vorübergehend löschen).
 ## Projektstruktur
 
 Siehe [README.md](README.md) für die Einrichtungsanleitung (Firebase, GitHub Pages, QR-Codes).
-Code-Dateien: `index.html`, `app.js`, `lib.js`, `qr.html`, `qr.js`, `vendor/`, `register-sw.js`,
+Code-Dateien: `index.html`, `app.js`, `lib.js`, `ocr.js`, `qr.html`, `qr.js`, `vendor/` (inkl. Firebase), `register-sw.js`,
 `style.css`, `manifest.json`, `icon.svg`, `sw.js`, `firebase-config.js`, `firestore.rules`.
 Tests: `tests/`, `package.json`, `firebase.json` (siehe [TESTS.md](TESTS.md)).

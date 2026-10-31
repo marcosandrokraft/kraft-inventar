@@ -1,8 +1,26 @@
 # Vorschläge, die eine Entscheidung brauchen
 
 Stand: 2026-10-31 (Session "verbesserungen-2026-10-31"). Hier steht, was den Ablauf, das Datenmodell
-oder die Navigation ändern würde. **Nichts davon ist umgesetzt.** Antworte einfach mit der Nummer und
-"ja", "nein" oder "anders: …".
+oder die Navigation ändern würde. Antworte einfach mit der Nummer und "ja", "nein" oder "anders: …".
+
+## Entscheidungen (2026-10-31) und Stand nach Runde 2
+
+| Nr. | Thema | Entscheidung | Stand |
+|---|---|---|---|
+| 1 | Hierarchie Raum → Schrank → Fach → Box | **ja** – Behälter auch ohne übergeordneten Ort, Ebenen überspringbar | umgesetzt (Runde 2) |
+| 2 | NFC | ohne Code: Sticker mit NFC-App beschreiben | keine Codeänderung |
+| 3 | Mehr Einheiten | **ja**: l, kg, Flasche, Dose, Packung, Glas, Stück | umgesetzt ("Stück" = bestehendes "Stk") |
+| 4 | Behälter löschen | **ja**, nur wenn leer, mit Rückgängig | umgesetzt |
+| 5 | Einkaufsliste bei Menge 0 | **später**, zweiter Schritt, bezogen auf Küche/Kühlschrank | offen |
+| 6 | MHD | **ja**, optional für jeden Artikel; Kamera-Erkennung als Experiment | umgesetzt |
+| 7 | ±50 bei g/ml | **ja** | umgesetzt |
+| 8 | Umzugsmodus | **ja** | umgesetzt (Auswahl + "Verschieben nach…"; Ziel-QR scannen noch nicht) |
+| 9 | Leiste unten + zuletzt geöffnet | **ja** | umgesetzt |
+| 10 | Fotos auslagern / Firebase Storage | **nein** | – |
+| 11 | Firebase selbst hosten | **ja**, falls gratis, mind. gleich schnell, sicherer | umgesetzt (Begründung in STAND.md) |
+| 12 | "Zuletzt geändert von" | **nein** | – |
+
+Die Abschnitte unten sind der ursprüngliche Vorschlagstext (zum Nachlesen).
 
 Aufwand: S = unter 1 Std., M = 1–3 Std., L = mehr als 3 Std. (jeweils inkl. Tests).
 
