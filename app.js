@@ -618,7 +618,7 @@ function showItemDetails(containerId, itemId, item) {
     ${hasPhoto ? `<img alt="" />` : ""}
     <strong></strong>
     <span class="muted">${escapeHtml(String(item.qty ?? 1))} ${escapeHtml(item.unit || "")}</span>
-    <span class="muted">MHD: ${isValidIsoDate(item.mhd) ? mhdBadge(item.mhd) : "–"}</span>
+    <span class="muted">${isValidIsoDate(item.mhd) ? mhdBadge(item.mhd) : "MHD: –"}</span>
     <div class="photo-actions">
       <button type="button" data-action="change">📷 ${hasPhoto ? "Foto ändern" : "Foto hinzufügen"}</button>
       <button type="button" data-action="mhd">📅 MHD</button>
