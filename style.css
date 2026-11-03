@@ -191,6 +191,16 @@ h1 {
   min-width: 0;
 }
 
+/* Typ-Icon (Raum, Schrank, Fach, Box) vor dem Behälternamen; leerer Platzhalter ohne Typ. */
+.type-icon {
+  width: 1.4rem;
+  height: 1.4rem;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+#container-type { display: flex; align-items: center; gap: 0.3rem; }
+#container-type .type-icon { width: 1.1rem; height: 1.1rem; }
+
 .card .name strong {
   display: block;
   font-size: 1.05rem;
@@ -491,7 +501,7 @@ body.has-bottom-nav .toast { bottom: calc(4.3rem + env(safe-area-inset-bottom));
 .breadcrumb { color: var(--muted); font-size: 0.9rem; margin: 0 0 0.2rem; overflow-wrap: anywhere; }
 .breadcrumb[hidden] { display: none; }
 .breadcrumb a { color: var(--accent); text-decoration: none; display: inline-block; padding: 0.6rem 0; }
-#container-type { display: block; margin: -0.8rem 0 0.8rem; }
+#container-type { margin: -0.8rem 0 0.8rem; }
 #container-type:empty { display: none; }
 .children h2 { font-size: 1rem; color: var(--muted); margin: 0.2rem 0 0.5rem; }
 .children[hidden] { display: none; }

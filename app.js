@@ -438,6 +438,20 @@ function typeLabel(type) {
   return CONTAINER_TYPES[type] || "";
 }
 
+// Kleine Strich-Icons pro Typ (feste SVGs, keine Nutzerdaten), Farbe über currentColor.
+const TYPE_ICON_PATHS = {
+  raum: '<path d="M5 21V4a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v17"/><path d="M3 21h18"/><circle cx="15" cy="12.5" r="1" fill="currentColor"/>',
+  schrank: '<rect x="4" y="2.5" width="16" height="17" rx="1.5"/><path d="M12 2.5v17M10 10v2.5M14 10v2.5M6.5 19.5v2M17.5 19.5v2"/>',
+  fach: '<rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 12h18M10 8h4M10 16h4"/>',
+  box: '<path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z"/><path d="m3 7.5 9 4.5 9-4.5M12 12v9"/>',
+};
+function typeIcon(type) {
+  const paths = TYPE_ICON_PATHS[type];
+  return paths
+    ? `<svg class="type-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`
+    : "";
+}
+
 // --- MHD (Mindesthaltbarkeitsdatum) ---
 
 function mhdBadge(mhd) {
@@ -1231,7 +1245,7 @@ function containerCard(id, extra = "") {
   a.href = `index.html?c=${encodeURIComponent(id)}`;
   a.className = "card";
   a.dataset.cid = id;
-  a.innerHTML = `<div class="name"><strong>${escapeHtml(c.name)}</strong><small>${escapeHtml(meta || extra)}</small></div><div aria-hidden="true">›</div>`;
+  a.innerHTML = `${typeIcon(c.type) || `<span class="type-icon" aria-hidden="true"></span>`}<div class="name"><strong>${escapeHtml(c.name)}</strong><small>${escapeHtml(meta || extra)}</small></div><div aria-hidden="true">›</div>`;
   return a;
 }
 
@@ -1675,7 +1689,8 @@ function renderContainer(id) {
       a.textContent = p.name;
       breadcrumbEl.appendChild(a);
     });
-    typeEl.textContent = typeLabel(allContainers.get(id)?.type);
+    const type = allContainers.get(id)?.type;
+    typeEl.innerHTML = type ? `${typeIcon(type)}<span>${escapeHtml(typeLabel(type))}</span>` : "";
     const kids = childContainers(id, allContainers);
     childrenEl.hidden = !kids.length;
     childrenEl.innerHTML = kids.length ? `<h2>Darin</h2>` : "";

@@ -460,6 +460,8 @@ test("11 Hierarchie: oberste Ebene, Pfad, Unterbehälter, Suche mit Pfad, liegt-
   await page.waitForSelector('#children a.card[data-cid="gemuesefach"]');
   assertEqual((await page.textContent("#breadcrumb")).trim(), "Küche", "Breadcrumb");
   assertEqual(await page.textContent("#container-type"), "Schrank", "Typ");
+  assertEqual(await page.locator("#container-type svg.type-icon").count(), 1, "Typ-Icon unter dem Titel");
+  assertEqual(await page.locator('#children a.card[data-cid="gemuesefach"] svg.type-icon').count(), 1, "Typ-Icon bei Unterbehälter");
   assertEqual(await page.getAttribute("#breadcrumb a", "href"), "index.html?c=kueche", "Breadcrumb-Link");
 
   // Unterbehälter anlegen: "Fach 1" gibt es schon im Keller → eigene ID
