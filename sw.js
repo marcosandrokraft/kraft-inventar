@@ -3,7 +3,7 @@
 // Firebase-Bibliotheken (selbst gehostet unter vendor/, feste Version im Pfad, ändern sich nie):
 // cache-first – schneller Start und die App öffnet sich auch ohne Netz (Daten kommen dann aus dem
 // Firestore-Offline-Speicher). Neue Firebase-Version = neuer Ordnername (siehe vendor/…/README.txt).
-const CACHE = "vorrat-shell-v7";
+const CACHE = "vorrat-shell-v8";
 const LIB_CACHE = "vorrat-libs-v2";
 const FIREBASE_DIR = "vendor/firebase-10.14.1/";
 const LIBS = ["firebase-app.js", "firebase-firestore.js", "firebase-auth.js"].map((f) => FIREBASE_DIR + f);
@@ -16,7 +16,8 @@ const FIREBASE_PREFIX = new URL(FIREBASE_DIR, self.location.href).href;
 self.addEventListener("install", (event) => {
   event.waitUntil(
     Promise.all([
-      caches.open(CACHE).then((cache) => cache.addAll(SHELL)),
+      // cache: "reload" – nicht die (bis 10 Min. alte) Kopie aus dem HTTP-Cache des Browsers nehmen.
+      caches.open(CACHE).then((cache) => cache.addAll(SHELL.map((u) => new Request(u, { cache: "reload" })))),
       caches.open(LIB_CACHE).then((cache) => cache.addAll(LIBS)),
     ])
       .catch(() => {}) // Vorab-Cache ist nur ein Bonus; Installation nicht daran scheitern lassen
@@ -63,7 +64,9 @@ self.addEventListener("fetch", (event) => {
 
   const key = shellKey(req.url);
   event.respondWith(
-    fetch(req)
+    // no-cache: beim Server nachfragen statt die bis 10 Min. alte HTTP-Cache-Kopie von GitHub Pages
+    // zu nehmen (sonst passen z.B. neue qr.js und alte lib.js nicht zusammen). Unverändert = 304, billig.
+    fetch(req, { cache: "no-cache" })
       .then((response) => {
         if (response.ok && response.type === "basic") {
           const copy = response.clone();

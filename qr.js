@@ -33,7 +33,14 @@ function setSelected(card, on) {
   card.querySelector("input").checked = on;
 }
 
-const { entries, selected } = parseQrPage(location.search);
+// Ohne Liste im Link (Lesezeichen, alte Version des Links in der App): die Liste, die die App auf
+// diesem Gerät zuletzt gesehen hat (localStorage, wird beim Abmelden gelöscht).
+function pageQuery() {
+  if (new URLSearchParams(location.search).has("c")) return location.search;
+  try { return localStorage.getItem("qrContainers") || ""; } catch { return ""; }
+}
+
+const { entries, selected } = parseQrPage(pageQuery());
 if (!entries.length) {
   document.getElementById("empty").hidden = false;
 } else {

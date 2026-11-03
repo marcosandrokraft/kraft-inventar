@@ -314,10 +314,12 @@ test("6 CSP: keine Verletzungen in index.html und qr.html, QR lokal als SVG", as
   assertEqual(qr.url, server.url + "index.html?c=box-3", "Link im QR-Code (nur die ID)");
   assert(qr.printEnabled, "Drucken-Knopf aktiv");
 
-  // Ohne Behälterliste: kein Eingabefeld mehr, nur Hinweis auf die App.
+  // Ohne Behälterliste (weder im Link noch von der App auf diesem Gerät): nur Hinweis auf die App.
+  await page.evaluate(() => localStorage.clear());
   await page.goto(server.url + "qr.html");
   await page.waitForSelector("#empty:not([hidden])");
   assertEqual(await page.locator("textarea, .qr-card").count(), 0, "kein Formular, keine Codes");
+  assertEqual(await page.locator("#toolbar").isVisible(), false, "keine Filterleiste ohne Behälter");
   assertEqual(t.net.external.slice(external), [], "qr.html: keine externen Anfragen");
   await t.done();
 });
@@ -1032,6 +1034,22 @@ test("23 Scannen unten öffnet direkt die Kamera, auch ohne BarcodeDetector (jsQ
   await page.waitForURL(/index\.html\?c=keller$/, { timeout: 10000 });
   await page.waitForSelector("#container-title:not(:empty)");
   assertEqual(await page.textContent("#container-title"), "Keller", "Behälter per Scan geöffnet");
+  await t.done();
+});
+
+test("24 qr.html ohne Liste im Link (Lesezeichen/alter Link) zeigt die Behälter dieses Geräts", async () => {
+  const t = await open("index.html", { seed: HOUSE });
+  const { page } = t;
+  await page.waitForSelector("#container-list a.card");
+  await page.goto(server.url + "qr.html");
+  await page.waitForSelector(".qr-card svg");
+  assertEqual(await page.locator(".qr-card").count(), 6, "alle Behälter aus der App");
+  assertEqual(await page.locator("#empty").isVisible(), false, "kein Hinweis");
+  assertEqual(await page.locator("#toolbar").isVisible(), true, "Filterleiste sichtbar");
+  // Ein Link mit Liste hat Vorrang vor der gespeicherten Liste.
+  await page.goto(server.url + "qr.html?c=box-x&n=Box%20X");
+  await page.waitForSelector(".qr-card svg");
+  assertEqual(await page.locator(".qr-card").count(), 1, "Liste aus dem Link");
   await t.done();
 });
 

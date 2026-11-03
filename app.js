@@ -362,6 +362,8 @@ function watchContainers() {
     });
     containersLoaded = true;
     document.querySelectorAll("a[data-qr]").forEach(setQrHref);
+    // Für qr.html, falls sie ohne Liste geöffnet wird (Lesezeichen, alte Version des Links).
+    storageSet(QR_LIST_KEY, qrPageQuery(allContainers));
     containerListeners.forEach((fn) => fn());
   }, (err) => {
     containersError = err;
@@ -389,6 +391,7 @@ function containersReady() {
 
 // Links zur QR-Druckseite (a[data-qr]) übergeben immer alle Behälter; data-qr-sel = der Behälter,
 // der schon angehakt sein soll (sonst alle). Beim Klick neu berechnet, falls sich etwas geändert hat.
+const QR_LIST_KEY = "qrContainers"; // gleicher Schlüssel in qr.js
 function setQrHref(a) {
   const sel = a.dataset.qrSel;
   let containers = allContainers;
@@ -1048,6 +1051,7 @@ function showLogout(user) {
   btn.title = user.email || "";
   btn.addEventListener("click", async () => {
     await signOut(auth);
+    storageSet(QR_LIST_KEY, null);
     // Offline-Kopie der Daten auf diesem Gerät löschen (wichtig auf fremden/geteilten Geräten).
     try {
       await terminate(db);
