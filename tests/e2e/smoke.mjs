@@ -311,7 +311,7 @@ test("6 CSP: keine Verletzungen in index.html und qr.html, QR lokal als SVG", as
   assertEqual(qr.cards, 1, "ein QR-Code");
   assert(qr.svgChildren > 0, "SVG enthält Pfade");
   assertEqual(qr.label, "Box 3", "Beschriftung");
-  assertEqual(qr.url, server.url + "index.html?c=box-3&n=Box%203", "Link im QR-Code");
+  assertEqual(qr.url, server.url + "index.html?c=box-3", "Link im QR-Code (nur die ID)");
   assert(qr.printEnabled, "Drucken-Knopf aktiv");
 
   // Ohne Behälterliste: kein Eingabefeld mehr, nur Hinweis auf die App.
@@ -577,7 +577,8 @@ test("14 Umzugsmodus: mehrere Artikel auf einmal verschieben, Rückgängig", asy
   await page.click("#select-move");
   await page.waitForSelector('.photo-dialog [data-action="ok"]:not([disabled])');
   assertEqual(await page.textContent(".photo-dialog strong"), "3 Artikel", "Dialogtitel");
-  assertEqual(await page.locator('.photo-dialog [data-action="scan"]').count(), 0, "ohne BarcodeDetector kein Scan-Knopf");
+  const hasCamera = await page.evaluate(() => !!navigator.mediaDevices?.getUserMedia);
+  assertEqual(await page.locator('.photo-dialog [data-action="scan"]').count(), hasCamera ? 1 : 0, "Scan-Knopf nur mit Kamera-API");
   await page.selectOption("#move-target", "garage");
   await page.click('.photo-dialog [data-action="ok"]');
   await card(page, "nudeln").waitFor({ state: "detached" });
@@ -972,6 +973,65 @@ test("21 QR-Druckseite: alle Behälter aus der App, auswählen, filtern, nur Ang
   assertEqual(cards.length, 6, "alle Behälter auch aus dem Behälter");
   assertEqual(cards.filter((c) => c.on).map((c) => c.name), ["Kühlschrank"], "nur dieser angehakt");
   assertEqual(await page.textContent("#count"), "1", "Zähler 1");
+  await t.done();
+});
+
+test("22 QR-Code bleibt gleich: hängt nur an der ID, nicht an Name oder Ort", async () => {
+  const t = await open("qr.html?c=kuehlschrank&n=K%C3%BChlschrank&p=K%C3%BCche");
+  const { page } = t;
+  const snapshot = async () => {
+    await page.waitForSelector(".qr-card svg");
+    return page.evaluate(() => ({ url: document.querySelector(".qr-card .url").textContent, svg: document.querySelector(".qr-card svg").outerHTML }));
+  };
+  const before = await snapshot();
+  await page.goto(server.url + "qr.html?c=kuehlschrank&n=Eisschrank&p=Keller%20%E2%80%BA%20Regal");
+  const after = await snapshot();
+  assertEqual(after.url, server.url + "index.html?c=kuehlschrank", "Link nur mit ID");
+  assertEqual(after.url, before.url, "gleicher Link nach Umbenennen/Verschieben");
+  assert(after.svg === before.svg, "gleiches QR-Bild nach Umbenennen/Verschieben");
+  await t.done();
+});
+
+// Kamera ohne BarcodeDetector (wie iPhone/Safari): die Kamera zeigt einen echten QR-Code, erkannt
+// wird er von jsQR.
+const FAKE_CAMERA_WITH_QR = () => {
+  delete window.BarcodeDetector;
+  const loadScript = (src) => new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = src; s.onload = res; s.onerror = rej;
+    document.head.appendChild(s);
+  });
+  if (!navigator.mediaDevices) Object.defineProperty(navigator, "mediaDevices", { value: {} });
+  navigator.mediaDevices.getUserMedia = async () => {
+    await loadScript("vendor/qrcode-generator-1.4.4.js");
+    const qr = window.qrcode(0, "M");
+    qr.addData(new URL("index.html?c=keller", location.href).href);
+    qr.make();
+    const n = qr.getModuleCount(), cell = 8, margin = 4 * cell, size = n * cell + 2 * margin;
+    const c = document.createElement("canvas");
+    c.width = c.height = size;
+    const ctx = c.getContext("2d");
+    const draw = () => {
+      ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, size, size);
+      ctx.fillStyle = "#000";
+      for (let r = 0; r < n; r++) for (let k = 0; k < n; k++) if (qr.isDark(r, k)) ctx.fillRect(margin + k * cell, margin + r * cell, cell, cell);
+    };
+    draw();
+    setInterval(draw, 100); // captureStream liefert nur bei Änderungen neue Bilder
+    return c.captureStream(10);
+  };
+};
+
+test("23 Scannen unten öffnet direkt die Kamera, auch ohne BarcodeDetector (jsQR)", async () => {
+  const t = await open("index.html", { init: FAKE_CAMERA_WITH_QR, seed: HOUSE, viewport: { width: 360, height: 740 }, isMobile: true, hasTouch: true });
+  const { page } = t;
+  await page.waitForSelector("#container-list a.card");
+  assertEqual(await page.evaluate(() => "BarcodeDetector" in window), false, "kein BarcodeDetector");
+  assert(await page.locator("#scan-btn").count() === 1, "Scan-Knopf in der Übersicht");
+  await page.locator('#bottom-nav [data-nav="scan"]').tap();
+  await page.waitForURL(/index\.html\?c=keller$/, { timeout: 10000 });
+  await page.waitForSelector("#container-title:not(:empty)");
+  assertEqual(await page.textContent("#container-title"), "Keller", "Behälter per Scan geöffnet");
   await t.done();
 });
 

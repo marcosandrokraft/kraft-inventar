@@ -39,7 +39,7 @@ if (!entries.length) {
 } else {
   toolbar.hidden = false;
   for (const { id, name, where } of entries) {
-    const url = containerUrl(location.href, id, name);
+    const url = containerUrl(location.href, id); // nur die ID: Code bleibt beim Umbenennen/Verschieben gleich
     const card = document.createElement("label");
     card.className = "qr-card";
     card.dataset.id = id;

@@ -849,17 +849,68 @@ function mayAutoCreate(id) {
   }
 }
 
-const canScan = "BarcodeDetector" in window && !!navigator.mediaDevices?.getUserMedia;
+// Scannen geht überall mit Kamera: mit dem eingebauten BarcodeDetector (Android/Chrome), sonst mit
+// jsQR (iPhone/Safari, Firefox), das erst beim ersten Scan geladen wird.
+const canScan = !!navigator.mediaDevices?.getUserMedia;
+
+let jsQrPromise = null;
+function loadJsQr() {
+  jsQrPromise ||= new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "vendor/jsqr-1.4.0/jsQR.js";
+    s.onload = () => (window.jsQR ? resolve(window.jsQR) : reject(new Error("jsQR fehlt")));
+    s.onerror = () => { jsQrPromise = null; reject(new Error("QR-Erkennung nicht geladen")); };
+    document.head.appendChild(s);
+  });
+  return jsQrPromise;
+}
+
+// → async (video) => [rawValue, …]
+async function createQrDetector() {
+  if ("BarcodeDetector" in window) {
+    try {
+      const formats = await BarcodeDetector.getSupportedFormats?.();
+      if (!formats || formats.includes("qr_code")) {
+        const detector = new BarcodeDetector({ formats: ["qr_code"] });
+        return async (video) => (await detector.detect(video)).map((c) => c.rawValue);
+      }
+    } catch {}
+  }
+  const jsQR = await loadJsQr();
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  return async (video) => {
+    // Auf max. 640 px verkleinern – reicht für QR-Codes und hält ältere Handys flüssig.
+    const scale = Math.min(1, 640 / Math.max(video.videoWidth, video.videoHeight));
+    const w = Math.round(video.videoWidth * scale);
+    const h = Math.round(video.videoHeight * scale);
+    if (!w || !h) return [];
+    canvas.width = w;
+    canvas.height = h;
+    ctx.drawImage(video, 0, 0, w, h);
+    const code = jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: "dontInvert" });
+    return code?.data ? [code.data] : [];
+  };
+}
 
 // Kamera-Scanner. Ohne Optionen: Behälter-QR-Code → Behälter öffnen (legt ihn ggf. an).
 // Mit `onCode(rawValue)`: der Aufrufer prüft den Code selbst (z.B. Umzugsziel); liefert onCode
 // true, wird der Scanner geschlossen, sonst wird weitergesucht.
 async function openScanner({ hint = "QR-Code eines Behälters ins Bild halten", onCode = null } = {}) {
-  let stream;
+  const detectorReady = createQrDetector(); // lädt ggf. jsQR, während die Kamera startet
+  detectorReady.catch(() => {});
+  let stream, detect;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
   } catch (err) {
     toast(`Kamera nicht verfügbar (${err.name || err.message})`, 4000);
+    return;
+  }
+  try {
+    detect = await detectorReady;
+  } catch (err) {
+    stream.getTracks().forEach((t) => t.stop());
+    toast(`QR-Erkennung nicht verfügbar (${err.message})`, 4000);
     return;
   }
   const { overlay, close } = openDialog(`
@@ -879,26 +930,25 @@ async function openScanner({ hint = "QR-Code eines Behälters ins Bild halten", 
     if (!overlay.isConnected) { stop(); obs.disconnect(); }
   }).observe(document.body, { childList: true });
 
-  const detector = new BarcodeDetector({ formats: ["qr_code"] });
   let warned = false;
   const tick = async () => {
     if (!active) return;
     try {
       if (video.readyState >= 2) {
-        for (const code of await detector.detect(video)) {
+        for (const raw of await detect(video)) {
           if (onCode) {
-            if (onCode(code.rawValue)) {
+            if (onCode(raw)) {
               stop();
               close();
               return;
             }
             continue;
           }
-          const id = containerIdFromScan(code.rawValue, location.href);
+          const id = containerIdFromScan(raw, location.href);
           if (id) {
             stop();
             close();
-            const name = new URL(code.rawValue).searchParams.get("n");
+            const name = new URL(raw).searchParams.get("n");
             try { sessionStorage.setItem(SCANNED_KEY, id); } catch {}
             location.href = containerUrl(location.href, id, name);
             return;
@@ -1100,7 +1150,7 @@ function setupBottomNav() {
   });
   nav.querySelector('[data-nav="scan"]').addEventListener("click", () => {
     if (canScan) openScanner();
-    else toast("Auf diesem Gerät: QR-Code mit der Kamera-App scannen", 4000);
+    else toast("Dieser Browser kann keine Kamera öffnen – QR-Code mit der Kamera-App scannen", 4000);
   });
   nav.querySelector('[data-nav="recent"]').addEventListener("click", showRecentDialog);
   const current = containerId ? null : listView(listName) ? listName : "home";

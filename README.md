@@ -47,6 +47,10 @@ die Regeln in der Konsole erneut veröffentlichen.
    Die Druckseite zeigt alle Behälter, alle sind angehakt. Über "QR" in einem Behälter ist nur dieser
    angehakt. Mit "Alle"/"Keine", Filter und Antippen auswählen, was gedruckt werden soll.
 3. Druckgrösse wählen, "Drucken", QR-Codes ausschneiden und auf die Behälter/Schränke kleben.
+   Der QR-Code enthält nur die feste ID des Behälters (`index.html?c=<id>`). Er bleibt gleich, auch wenn
+   der Behälter umbenannt, verschoben oder befüllt wird. Ältere Codes mit `&n=Name` funktionieren weiter.
+   Scannen: "📷" unten öffnet direkt die Kamera, auf Android über den eingebauten Erkenner, auf
+   iPhone/Firefox über jsQR (`vendor/jsqr-1.4.0/`, wird erst beim ersten Scan geladen).
    Die Codes werden lokal im Browser erzeugt (kein Fremddienst).
 4. Tipp: Statt/zusätzlich zum QR-Code kann derselbe Link auf einen NFC-Sticker geschrieben werden
    (z.B. mit der App "NFC Tools") – Handy dranhalten öffnet den Behälter.
