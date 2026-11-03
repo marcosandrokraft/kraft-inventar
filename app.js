@@ -643,7 +643,7 @@ function showItemDetails(containerId, itemId, item) {
     <span class="muted">${escapeHtml(String(item.qty ?? 1))} ${escapeHtml(item.unit || "")}</span>
     <span class="muted">${isValidIsoDate(item.mhd) ? mhdBadge(item.mhd) : "MHD: –"}</span>
     <div class="photo-actions">
-      <button type="button" data-action="change" class="neutral">${icon("camera")}${hasPhoto ? "Foto ändern" : "Foto hinzufügen"}</button>
+      <button type="button" data-action="change">${icon("camera")}${hasPhoto ? "Foto ändern" : "Foto hinzufügen"}</button>
       <button type="button" data-action="mhd" class="neutral">${icon("calendar")}MHD</button>
     </div>
     <div class="photo-actions">
