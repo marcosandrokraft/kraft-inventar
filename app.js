@@ -672,7 +672,7 @@ function showItemDetails(containerId, itemId, item) {
   delBtn.addEventListener("click", confirmFirst(delBtn, () => {
     close();
     removeItem(containerId, itemId, item);
-  }, "Wirklich entfernen?"));
+  }, "Entfernen?"));
 }
 
 // Ziele zum Verschieben: alle Behälter ausser dem aktuellen, mit Pfad, alphabetisch nach Pfad.
@@ -1587,9 +1587,9 @@ function renderContainer(id) {
       placeholder="In diesem Behälter filtern" autocomplete="off" aria-label="Artikel filtern" /></div>
     <div id="items"><p class="empty-hint">Lade…</p></div>
     <div class="select-bar" id="select-bar" hidden>
-      <span id="select-count">0 ausgewählt</span>
+      <span id="select-count">0 gewählt</span>
       <button type="button" id="select-all" class="secondary">Alle</button>
-      <button type="button" id="select-move" disabled>${icon("move")}Verschieben</button>
+      <button type="button" id="select-move" disabled>Verschieben</button>
       <button type="button" id="select-cancel" class="secondary" aria-label="Auswahl beenden">${icon("close")}</button>
     </div>
     <form class="add-form" id="add-item-form">
@@ -1814,7 +1814,7 @@ function renderContainer(id) {
     for (const sid of [...selected]) if (!currentItems.has(sid)) selected.delete(sid);
     selectBar.hidden = !selecting;
     document.body.classList.toggle("selecting", selecting);
-    document.getElementById("select-count").textContent = `${selected.size} ausgewählt`;
+    document.getElementById("select-count").textContent = `${selected.size} gewählt`;
     document.getElementById("select-move").disabled = !selected.size;
     document.getElementById("select-btn").setAttribute("aria-pressed", String(selecting));
   }

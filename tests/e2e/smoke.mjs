@@ -580,7 +580,7 @@ test("14 Umzugsmodus: mehrere Artikel auf einmal verschieben, Rückgängig", asy
   await page.click("#select-btn");
   await page.waitForSelector("#select-bar:not([hidden])");
   for (const id of ["nudeln", "reis", "mehl"]) await page.click(`#items .select-card[data-id="${id}"]`);
-  assertEqual(await page.textContent("#select-count"), "3 ausgewählt", "Zähler");
+  assertEqual(await page.textContent("#select-count"), "3 gewählt", "Zähler");
   page.__nextDialog = () => "accept"; // alert wegen Mehl (andere Einheit im Ziel)
   await page.click("#select-move");
   await page.waitForSelector('.photo-dialog [data-action="ok"]:not([disabled])');
@@ -736,7 +736,7 @@ test("18 Umzug: 'Alle' wählt nur gefilterte Artikel; Dialog über der Leiste", 
   await page.fill("#item-filter", "milch");
   await page.click("#select-btn");
   await page.click("#select-all");
-  assertEqual(await page.textContent("#select-count"), "1 ausgewählt", "nur der sichtbare Artikel");
+  assertEqual(await page.textContent("#select-count"), "1 gewählt", "nur der sichtbare Artikel");
   await page.click("#select-move");
   await page.waitForSelector('.photo-dialog [data-action="ok"]:not([disabled])');
   const onTop = await page.evaluate(() => {
@@ -1094,7 +1094,7 @@ test("25 Papierkorb: erster Tipp fragt nach, erst zweiter Tipp löscht, dann Rü
   // Detailansicht: "Entfernen" braucht ebenfalls zwei Tipps.
   await card(page, "reis").locator('[data-action="details"]').tap();
   await page.locator('.photo-dialog [data-action="del"]').tap();
-  assertEqual(await page.textContent('.photo-dialog [data-action="del"]'), "Wirklich entfernen?", "Nachfrage im Dialog");
+  assertEqual(await page.textContent('.photo-dialog [data-action="del"]'), "Entfernen?", "Nachfrage im Dialog");
   assert(await page.locator(".photo-dialog").isVisible(), "Dialog bleibt offen");
   await page.locator('.photo-dialog [data-action="del"]').tap();
   await card(page, "reis").waitFor({ state: "detached" });

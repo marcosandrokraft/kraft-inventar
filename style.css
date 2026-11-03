@@ -233,7 +233,9 @@ h1 {
 }
 
 .photo-actions button {
-  flex: 1;
+  flex: 1 1 0; /* gleich breite Knöpfe, auch wenn der Text wechselt ("Entfernen?") */
+  min-width: 0;
+  line-height: 1.2;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -747,7 +749,7 @@ form.add-form select[name="type"] { flex: 0 1 110px; }
   border-top: 1px solid var(--border);
 }
 .select-bar[hidden] { display: none; }
-.select-bar span { flex: 1; min-width: 0; font-weight: 600; }
+.select-bar span { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .select-bar button {
   display: inline-flex;
   align-items: center;
