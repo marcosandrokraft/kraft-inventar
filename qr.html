@@ -12,7 +12,7 @@
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--qr-size, 140px), 1fr)); gap: 1rem; margin-top: 1rem; }
   .qr-card { position: relative; background: #fff; color: #000; border: 1px dashed #bbb; border-radius: 10px; padding: 0.6rem; text-align: center; break-inside: avoid; cursor: pointer; }
   .qr-card:not(.selected) { opacity: 0.4; }
-  .qr-card.selected { border: 2px solid var(--accent); box-shadow: var(--shadow-card); }
+  .qr-card.selected { border: 2px solid var(--accent); box-shadow: var(--shadow); }
   .qr-card input { position: absolute; top: 0.4rem; left: 0.4rem; width: 28px; height: 28px; margin: 0; accent-color: var(--accent); }
   .qr-card svg { width: 100%; height: auto; display: block; }
   .qr-card .label { margin-top: 0.3rem; font-weight: 700; font-size: 1.05rem; word-break: break-word; }
@@ -21,11 +21,11 @@
   .qr-toolbar[hidden] { display: none; }
   .qr-toolbar { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; }
   .qr-toolbar button, .qr-toolbar select, .qr-toolbar input { min-height: 44px; font-size: 1rem; }
-  .qr-toolbar input[type="search"], .qr-toolbar select { border-radius: 12px; border: 1px solid transparent; background: var(--sunken); color: var(--text); }
+  .qr-toolbar input[type="search"], .qr-toolbar select { border-radius: 12px; border: none; background: var(--card); box-shadow: var(--shadow); color: var(--text); }
   .qr-toolbar input[type="search"] { flex: 1 1 12rem; padding: 0 0.9rem; }
   .qr-toolbar select { padding: 0 0.5rem; }
   .qr-toolbar button { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0 1rem; border-radius: 999px; border: none; background: var(--accent); color: var(--accent-contrast); font-weight: 600; cursor: pointer; }
-  .qr-toolbar button.secondary { background: var(--card); color: var(--text); box-shadow: var(--shadow-card); }
+  .qr-toolbar button.secondary { background: var(--accent-soft); color: var(--accent); }
   .qr-card[hidden] { display: none; }
   @media print {
     body { background: #fff; padding: 0; }
