@@ -155,6 +155,31 @@ function toast(msg, opts = {}) {
   toastTimer = setTimeout(() => toastEl.classList.remove("show", "has-action"), ms);
 }
 
+// Löschen in zwei Schritten gegen versehentliches Tippen: erster Tipp → Knopf wird rot ("Löschen?"),
+// zweiter Tipp innerhalb von 4 s löscht. Danach gibt es trotzdem noch "Rückgängig".
+function confirmFirst(btn, fn, label = "Löschen?") {
+  const original = btn.innerHTML;
+  const originalLabel = btn.getAttribute("aria-label");
+  let timer = null;
+  const reset = () => {
+    clearTimeout(timer);
+    btn.classList.remove("confirm");
+    btn.innerHTML = original;
+    if (originalLabel) btn.setAttribute("aria-label", originalLabel);
+  };
+  return (e) => {
+    if (!btn.classList.contains("confirm")) {
+      btn.classList.add("confirm");
+      btn.textContent = label;
+      btn.setAttribute("aria-label", "Zum Löschen nochmals tippen");
+      timer = setTimeout(reset, 4000);
+      return;
+    }
+    reset();
+    fn(e);
+  };
+}
+
 // Schreibvorgänge nicht abwarten: Mit Offline-Speicher erscheinen Änderungen sofort, die Bestätigung
 // vom Server kommt (ohne Netz) evtl. erst viel später. Fehler (z.B. Regeln) werden trotzdem gemeldet.
 function background(promise, what = "Speichern") {
@@ -606,10 +631,11 @@ function showItemDetails(containerId, itemId, item) {
     close();
     showMoveDialog(containerId, [{ itemId, item }]);
   });
-  overlay.querySelector('[data-action="del"]').addEventListener("click", () => {
+  const delBtn = overlay.querySelector('[data-action="del"]');
+  delBtn.addEventListener("click", confirmFirst(delBtn, () => {
     close();
     removeItem(containerId, itemId, item);
-  });
+  }, "Wirklich entfernen?"));
 }
 
 // Ziele zum Verschieben: alle Behälter ausser dem aktuellen, mit Pfad, alphabetisch nach Pfad.
@@ -1479,7 +1505,8 @@ function showContainerSettings(id, onDeleted) {
     }, { merge: true }), "Speichern");
     toast("Gespeichert");
   });
-  overlay.querySelector('[data-action="delete"]')?.addEventListener("click", async () => {
+  const deleteBtn = overlay.querySelector('[data-action="delete"]');
+  deleteBtn?.addEventListener("click", confirmFirst(deleteBtn, async () => {
     const hint = overlay.querySelector("#cs-hint");
     const kids = childContainers(id, allContainers);
     if (kids.length) {
@@ -1498,7 +1525,7 @@ function showContainerSettings(id, onDeleted) {
     }
     close();
     onDeleted();
-  });
+  }, "Wirklich löschen?"));
 }
 
 // --- Behälter-Ansicht ---
@@ -1850,7 +1877,8 @@ function renderContainer(id) {
       card.querySelector('[data-action="inc"]').addEventListener("click", () => changeQty(id, itemId, currentItems.get(itemId) || item, 1));
       card.querySelector('[data-action="dec"]').addEventListener("click", () => changeQty(id, itemId, currentItems.get(itemId) || item, -1));
       card.querySelector('[data-action="set"]').addEventListener("click", () => setQty(id, itemId, item));
-      card.querySelector('[data-action="del"]').addEventListener("click", () => removeItem(id, itemId, item));
+      const delBtn = card.querySelector('[data-action="del"]');
+      delBtn.addEventListener("click", confirmFirst(delBtn, () => removeItem(id, itemId, item)));
       itemsEl.appendChild(card);
     }
 
@@ -1944,7 +1972,7 @@ function setQty(containerId, itemId, item) {
   background(updateDoc(itemRef(containerId, itemId), { qty: Math.min(MAX_QTY, n), updatedAt: serverTimestamp() }));
 }
 
-// Entfernen ohne Rückfrage, dafür mit "Rückgängig" (stellt Name, Menge, Einheit, Foto und MHD wieder her).
+// Entfernen (Papierkorb fragt vorher per zweitem Tipp nach), danach noch "Rückgängig" (stellt Name, Menge, Einheit, Foto und MHD wieder her).
 function removeItem(containerId, itemId, item) {
   const ref = itemRef(containerId, itemId);
   // Ältere IDs (nicht im App-Format) dürfen laut Regeln nicht neu angelegt werden.
@@ -1953,7 +1981,7 @@ function removeItem(containerId, itemId, item) {
   const backup = itemBackup(item);
   background(deleteDoc(ref), "Entfernen");
   toast(`"${item.name}" entfernt`, {
-    ms: 6000,
+    ms: 8000,
     action: {
       label: "Rückgängig",
       fn: () => {

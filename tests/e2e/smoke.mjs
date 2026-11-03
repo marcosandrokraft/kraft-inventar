@@ -499,6 +499,7 @@ test("12 Behälter löschen nur wenn leer, mit Rückgängig", async () => {
   await page.waitForSelector('#children a.card[data-cid="gemuesefach"]');
   await page.click("#edit-btn");
   await page.click('.photo-dialog [data-action="delete"]');
+  await page.click('.photo-dialog [data-action="delete"].confirm'); // zweiter Tipp
   await waitUntil(page, () => document.querySelector("#cs-hint").textContent.includes("Gemüsefach"));
   await page.click('.photo-dialog [data-action="close"]');
 
@@ -506,15 +507,18 @@ test("12 Behälter löschen nur wenn leer, mit Rückgängig", async () => {
   await page.waitForSelector('#items .card[data-id="karotten"]');
   await page.click("#edit-btn");
   await page.click('.photo-dialog [data-action="delete"]');
+  await page.click('.photo-dialog [data-action="delete"].confirm'); // zweiter Tipp
   await waitUntil(page, () => document.querySelector("#cs-hint").textContent.includes("1 Artikel"));
   await page.click('.photo-dialog [data-action="close"]');
   assert(!(await t.writes()).some((x) => x.op === "delete"), "nichts gelöscht");
 
   // leeren und löschen
   await card(page, "karotten").locator('[data-action="del"]').click();
+  await card(page, "karotten").locator('[data-action="del"].confirm').click(); // zweiter Tipp
   await card(page, "karotten").waitFor({ state: "detached" });
   await page.click("#edit-btn");
   await page.click('.photo-dialog [data-action="delete"]');
+  await page.click('.photo-dialog [data-action="delete"].confirm'); // zweiter Tipp
   await page.waitForSelector("#undo-delete");
   assert(!("containers/gemuesefach" in (await t.db())), "Behälter gelöscht");
   await page.waitForTimeout(200);
@@ -1050,6 +1054,45 @@ test("24 qr.html ohne Liste im Link (Lesezeichen/alter Link) zeigt die Behälter
   await page.goto(server.url + "qr.html?c=box-x&n=Box%20X");
   await page.waitForSelector(".qr-card svg");
   assertEqual(await page.locator(".qr-card").count(), 1, "Liste aus dem Link");
+  await t.done();
+});
+
+test("25 Papierkorb: erster Tipp fragt nach, erst zweiter Tipp löscht, dann Rückgängig", async () => {
+  const t = await open("index.html?c=box-1", {
+    seed: {
+      "containers/box-1": { name: "Box 1" },
+      "containers/box-1/items/milch": { name: "Milch", qty: 2, unit: "Stk" },
+      "containers/box-1/items/reis": { name: "Reis", qty: 1, unit: "Packung" },
+    },
+    viewport: { width: 360, height: 740 }, isMobile: true, hasTouch: true,
+  });
+  const { page } = t;
+  await page.waitForSelector('#items .card[data-id="milch"]');
+  const del = card(page, "milch").locator('[data-action="del"]');
+
+  // Ein Tipp: nichts gelöscht, Knopf fragt nach; nach 4 s wieder normal.
+  await del.tap();
+  assertEqual(await del.textContent(), "Löschen?", "Nachfrage im Knopf");
+  assertEqual(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "keine horizontale Scrollbar");
+  await page.waitForTimeout(300);
+  assert(!(await t.writes()).some((w) => w.op === "delete"), "nach einem Tipp nichts gelöscht");
+  await waitUntil(page, () => document.querySelector('#items .card[data-id="milch"] [data-action="del"]').textContent === "🗑", { timeout: 6000 });
+
+  // Zwei Tipps: gelöscht, mit Rückgängig.
+  await del.tap();
+  await del.tap();
+  await card(page, "milch").waitFor({ state: "detached" });
+  assert(await page.locator("#toast button", { hasText: "Rückgängig" }).isVisible(), "Rückgängig sichtbar");
+  await page.locator("#toast button", { hasText: "Rückgängig" }).tap();
+  await page.waitForSelector('#items .card[data-id="milch"]');
+
+  // Detailansicht: "Entfernen" braucht ebenfalls zwei Tipps.
+  await card(page, "reis").locator('[data-action="details"]').tap();
+  await page.locator('.photo-dialog [data-action="del"]').tap();
+  assertEqual(await page.textContent('.photo-dialog [data-action="del"]'), "Wirklich entfernen?", "Nachfrage im Dialog");
+  assert(await page.locator(".photo-dialog").isVisible(), "Dialog bleibt offen");
+  await page.locator('.photo-dialog [data-action="del"]').tap();
+  await card(page, "reis").waitFor({ state: "detached" });
   await t.done();
 });
 
