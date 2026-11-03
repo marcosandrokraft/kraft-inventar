@@ -271,9 +271,10 @@ test("5 XSS: Namen werden als Text angezeigt", async () => {
   await page.waitForSelector('.photo-dialog [data-action="ok"]:not([disabled])');
   assertEqual(await page.locator("#move-target option").allTextContents(), [XSS], "Behältername im Verschieben-Dialog");
 
-  await page.goto(server.url + "qr.html?c=xss-box&n=" + encodeURIComponent(XSS));
+  await page.goto(server.url + "qr.html?c=xss-box&n=" + encodeURIComponent(XSS) + "&p=" + encodeURIComponent(XSS));
   await page.waitForSelector(".qr-card svg");
   assertEqual(await page.textContent(".qr-card .label"), XSS, "Name auf QR-Bogen");
+  assertEqual(await page.textContent(".qr-card .where"), XSS, "Ort auf QR-Bogen");
 
   await page.waitForTimeout(300);
   assertEqual(await page.evaluate(() => window.__xss), undefined, "window.__xss");
@@ -305,18 +306,18 @@ test("6 CSP: keine Verletzungen in index.html und qr.html, QR lokal als SVG", as
     svgChildren: document.querySelector(".qr-card svg").querySelectorAll("path, rect").length,
     label: document.querySelector(".qr-card .label").textContent,
     url: document.querySelector(".qr-card .url").textContent,
-    printVisible: !document.getElementById("print-btn").hidden,
+    printEnabled: !document.getElementById("print-btn").disabled,
   }));
   assertEqual(qr.cards, 1, "ein QR-Code");
   assert(qr.svgChildren > 0, "SVG enthält Pfade");
   assertEqual(qr.label, "Box 3", "Beschriftung");
   assertEqual(qr.url, server.url + "index.html?c=box-3&n=Box%203", "Link im QR-Code");
-  assert(qr.printVisible, "Drucken-Knopf sichtbar");
+  assert(qr.printEnabled, "Drucken-Knopf aktiv");
 
-  // Formular: mehrere Namen
-  await page.fill('textarea[name="names"]', "Kühlschrank\nGefrierfach\nKühlschrank");
-  await page.click('#gen-form button[type="submit"]');
-  await waitUntil(page, () => document.querySelectorAll(".qr-card svg").length === 2);
+  // Ohne Behälterliste: kein Eingabefeld mehr, nur Hinweis auf die App.
+  await page.goto(server.url + "qr.html");
+  await page.waitForSelector("#empty:not([hidden])");
+  assertEqual(await page.locator("textarea, .qr-card").count(), 0, "kein Formular, keine Codes");
   assertEqual(t.net.external.slice(external), [], "qr.html: keine externen Anfragen");
   await t.done();
 });
@@ -914,6 +915,63 @@ test("20 Umzug: Ziel per QR-Code scannen (BarcodeDetector-Fake), unbekannte Beh�
   assert(db["containers/keller/items/salz"], "Salz bleibt");
   assert(!("containers/neue-box" in db), "unbekannter Behälter nicht angelegt");
   assert(!(await t.writes()).some((w) => w.path.startsWith("containers/neue-box")), "keine Schreibzugriffe auf neue-box");
+  await t.done();
+});
+
+test("21 QR-Druckseite: alle Behälter aus der App, auswählen, filtern, nur Angehakte drucken", async () => {
+  const t = await open("index.html", { seed: HOUSE, viewport: { width: 360, height: 740 }, isMobile: true, hasTouch: true });
+  const { page } = t;
+  await page.waitForSelector("#container-list a.card");
+  const cardState = () => page.locator(".qr-card").evaluateAll((cs) => cs.map((c) => ({
+    name: c.querySelector(".label").textContent,
+    where: c.querySelector(".where")?.textContent || "",
+    on: c.classList.contains("selected") && c.querySelector("input").checked,
+  })));
+
+  // Oben "QR-Codes drucken": alle Behälter, alle angehakt, nach Pfad sortiert.
+  await page.click("#qr-header");
+  await page.waitForSelector(".qr-card svg");
+  let cards = await cardState();
+  assertEqual(cards.map((c) => c.name), ["Keller", "Fach 1", "Küche", "Kühlschrank", "Gemüsefach", "Lose Box"], "alle Behälter, nach Pfad");
+  assertEqual(cards.find((c) => c.name === "Gemüsefach").where, "Küche › Kühlschrank", "Ort");
+  assert(cards.every((c) => c.on), "alle angehakt");
+  assertEqual(await page.textContent("#count"), "6", "Zähler");
+  assertEqual(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "keine horizontale Scrollbar");
+
+  // Filter + "Keine" wirkt nur auf die gefilterten, Antippen schaltet um.
+  await page.fill("#filter", "kuhl");
+  await waitUntil(page, () => [...document.querySelectorAll(".qr-card")].filter((c) => !c.hidden).length === 2);
+  await page.click("#sel-none");
+  await page.fill("#filter", "");
+  await page.locator(".qr-card", { hasText: "Lose Box" }).locator("svg").tap();
+  cards = await cardState();
+  assertEqual(cards.filter((c) => c.on).map((c) => c.name), ["Keller", "Fach 1", "Küche"], "Auswahl");
+  assertEqual(await page.textContent("#count"), "3", "Zähler nach Auswahl");
+
+  // Druckansicht: nur die angehakten, ohne Checkboxen und Knöpfe.
+  await page.emulateMedia({ media: "print" });
+  const printed = await page.evaluate(() => ({
+    cards: [...document.querySelectorAll(".qr-card")].filter((c) => getComputedStyle(c).display !== "none").map((c) => c.querySelector(".label").textContent),
+    checkboxes: [...document.querySelectorAll(".qr-card input")].filter((i) => getComputedStyle(i).display !== "none").length,
+    toolbar: getComputedStyle(document.getElementById("toolbar")).display,
+  }));
+  assertEqual(printed.cards, ["Keller", "Fach 1", "Küche"], "gedruckt werden nur angehakte");
+  assertEqual(printed.checkboxes, 0, "keine Checkboxen im Druck");
+  assertEqual(printed.toolbar, "none", "keine Knöpfe im Druck");
+  await page.emulateMedia({ media: "screen" });
+  await page.click("#sel-none");
+  assert(await page.locator("#print-btn").isDisabled(), "Drucken aus, wenn nichts angehakt");
+
+  // "QR" im Behälter: gleiche Seite mit allen Behältern, nur dieser angehakt.
+  await page.goto(server.url + "index.html?c=kuehlschrank");
+  await page.waitForSelector("#container-title:not(:empty)");
+  await waitUntil(page, () => document.getElementById("qr-link").href.includes("sel="));
+  await page.click("#qr-link");
+  await page.waitForSelector(".qr-card svg");
+  cards = await cardState();
+  assertEqual(cards.length, 6, "alle Behälter auch aus dem Behälter");
+  assertEqual(cards.filter((c) => c.on).map((c) => c.name), ["Kühlschrank"], "nur dieser angehakt");
+  assertEqual(await page.textContent("#count"), "1", "Zähler 1");
   await t.done();
 });
 

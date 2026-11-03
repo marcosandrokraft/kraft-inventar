@@ -1,12 +1,15 @@
-// QR-Code-Druckbogen. Die Codes werden lokal erzeugt (vendor/qrcode-generator, MIT-Lizenz) –
-// früher wurde dafür jeder Behälter-Link an api.qrserver.com geschickt.
-import { parseQrEntries, containerUrl } from "./lib.js";
+// QR-Druckbogen: zeigt für jeden Behälter seinen QR-Code, angehakte werden gedruckt. Die Liste kommt
+// aus der App (qr.html?c=…&n=…&p=…&sel=…, siehe qrPageQuery in lib.js) – eigene Namen eintippen geht
+// bewusst nicht mehr, Behälter entstehen nur in der App. Die Codes werden lokal erzeugt
+// (vendor/qrcode-generator, MIT-Lizenz) – früher ging jeder Behälter-Link an api.qrserver.com.
+import { parseQrPage, containerUrl, normalizeSearch } from "./lib.js";
 
-const form = document.getElementById("gen-form");
 const grid = document.getElementById("grid");
+const toolbar = document.getElementById("toolbar");
+const filter = document.getElementById("filter");
+const size = document.getElementById("size");
+const count = document.getElementById("count");
 const printBtn = document.getElementById("print-btn");
-// Name → vorgegebene ID (aus der App übergeben), sonst wird die ID aus dem Namen erzeugt.
-const fixedIds = new Map();
 
 function qrSvg(text) {
   const qr = window.qrcode(0, "M"); // Typ automatisch, mittlere Fehlerkorrektur
@@ -15,49 +18,74 @@ function qrSvg(text) {
   return qr.createSvgTag({ cellSize: 4, margin: 4, scalable: true });
 }
 
-function render() {
-  const entries = parseQrEntries(form.names.value);
-  document.documentElement.style.setProperty("--qr-print", form.size.value);
-  grid.innerHTML = "";
-  for (const entry of entries) {
-    const name = entry.name;
-    const id = fixedIds.get(name) || entry.id; // umbenannte Behälter behalten ihre alte ID
+function cards() {
+  return [...grid.querySelectorAll(".qr-card")];
+}
+
+function updateCount() {
+  const n = cards().filter((c) => c.classList.contains("selected")).length;
+  count.textContent = n;
+  printBtn.disabled = n === 0;
+}
+
+function setSelected(card, on) {
+  card.classList.toggle("selected", on);
+  card.querySelector("input").checked = on;
+}
+
+const { entries, selected } = parseQrPage(location.search);
+if (!entries.length) {
+  document.getElementById("empty").hidden = false;
+} else {
+  toolbar.hidden = false;
+  for (const { id, name, where } of entries) {
     const url = containerUrl(location.href, id, name);
-    const card = document.createElement("div");
+    const card = document.createElement("label");
     card.className = "qr-card";
-    card.innerHTML = qrSvg(url); // SVG vom Generator, enthält nur Pfade
+    card.dataset.id = id;
+    card.dataset.search = normalizeSearch(`${name} ${where}`);
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.setAttribute("aria-label", `${name} drucken`);
+    box.addEventListener("change", () => { setSelected(card, box.checked); updateCount(); });
+    const svg = document.createElement("div");
+    svg.innerHTML = qrSvg(url); // SVG vom Generator, enthält nur Pfade
     const label = document.createElement("div");
     label.className = "label";
     label.textContent = name;
+    card.append(box, svg, label);
+    if (where) {
+      const w = document.createElement("div");
+      w.className = "where";
+      w.textContent = where;
+      card.append(w);
+    }
     const small = document.createElement("div");
     small.className = "url";
     small.textContent = url;
-    card.append(label, small);
+    card.append(small);
     grid.appendChild(card);
+    setSelected(card, !selected || selected.has(id));
   }
-  printBtn.hidden = !entries.length;
+  updateCount();
+  // Aus einem Behälter geöffnet → dorthin scrollen.
+  if (selected?.size === 1) grid.querySelector(".qr-card.selected")?.scrollIntoView({ block: "center" });
 }
 
-form.addEventListener("submit", (e) => {
-  e.preventDefault();
-  render();
+// "Alle"/"Keine" wirken nur auf die sichtbaren (gefilterten) Behälter.
+function visibleCards() {
+  return cards().filter((c) => !c.hidden);
+}
+document.getElementById("sel-all").addEventListener("click", () => { visibleCards().forEach((c) => setSelected(c, true)); updateCount(); });
+document.getElementById("sel-none").addEventListener("click", () => { visibleCards().forEach((c) => setSelected(c, false)); updateCount(); });
+filter.addEventListener("input", () => {
+  const q = normalizeSearch(filter.value.trim());
+  for (const c of cards()) c.hidden = !!q && !c.dataset.search.includes(q);
 });
-form.size.addEventListener("change", () => {
-  document.documentElement.style.setProperty("--qr-print", form.size.value);
-});
+
+function applySize() {
+  document.documentElement.style.setProperty("--qr-print", size.value);
+}
+size.addEventListener("change", applySize);
+applySize();
 printBtn.addEventListener("click", () => window.print());
-
-// Aus der App aufgerufen (qr.html?c=id1&n=Name1&c=id2&n=Name2…) → Liste vorausfüllen.
-const params = new URLSearchParams(location.search);
-const ids = params.getAll("c");
-const names = [];
-params.getAll("n").forEach((n, i) => {
-  const name = n.trim();
-  if (!name) return;
-  names.push(name);
-  if (ids[i]) fixedIds.set(name, ids[i]);
-});
-if (names.length) {
-  form.names.value = names.join("\n");
-  render();
-}

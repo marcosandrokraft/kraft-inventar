@@ -41,11 +41,12 @@ die Regeln in der Konsole erneut veröffentlichen.
 
 ## 4. QR-Codes erzeugen und aufkleben
 
-1. Öffne auf dem Handy oder PC `.../qr.html` deiner veröffentlichten Seite.
-2. Trage pro Zeile einen Behälter-Namen ein (z.B. `Kühlschrank`, `Gefrierfach`, `Vorratsschrank`,
-   `Kleiderschrank Marco`) und klicke "QR-Codes erzeugen". Oder in der App: "🖨 QR-Codes für alle
-   Behälter drucken" (Übersicht) bzw. "QR" im Behälter.
-3. Druckgrösse wählen, ausdrucken, QR-Codes ausschneiden und auf die Behälter/Schränke kleben.
+1. Behälter in der App anlegen (Übersicht → "Neuer Behälter"). Jeder Behälter hat damit automatisch
+   einen QR-Code.
+2. In der App oben "QR-Codes drucken" (oder "🖨 QR-Codes drucken (Auswahl)" in der Übersicht) antippen:
+   Die Druckseite zeigt alle Behälter, alle sind angehakt. Über "QR" in einem Behälter ist nur dieser
+   angehakt. Mit "Alle"/"Keine", Filter und Antippen auswählen, was gedruckt werden soll.
+3. Druckgrösse wählen, "Drucken", QR-Codes ausschneiden und auf die Behälter/Schränke kleben.
    Die Codes werden lokal im Browser erzeugt (kein Fremddienst).
 4. Tipp: Statt/zusätzlich zum QR-Code kann derselbe Link auf einen NFC-Sticker geschrieben werden
    (z.B. mit der App "NFC Tools") – Handy dranhalten öffnet den Behälter.

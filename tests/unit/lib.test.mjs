@@ -9,7 +9,8 @@ import {
   normalizeSearch,
   searchItems,
   containerIdFromScan,
-  parseQrEntries,
+  qrPageQuery,
+  parseQrPage,
   containerUrl,
   findObjectBounds,
   MAX_QTY,
@@ -153,11 +154,34 @@ describe("containerIdFromScan", () => {
 });
 
 describe("QR-Druckbogen", () => {
-  it("parseQrEntries: Leerzeilen weg, Duplikate zusammengefasst", () => {
-    assert.deepEqual(parseQrEntries("Kühlschrank\n\n  Gefrierfach \nkühlschrank\n!!!"), [
-      { id: "kühlschrank", name: "Kühlschrank" },
-      { id: "gefrierfach", name: "Gefrierfach" },
-    ]);
+  const containers = new Map([
+    ["kueche", { name: "Küche" }],
+    ["kühlschrank", { name: "Kühlschrank", parent: "kueche" }],
+    ["box-1", { name: "Box 1" }],
+  ]);
+
+  it("qrPageQuery: alle Behälter nach Pfad sortiert, mit Ort", () => {
+    const q = new URLSearchParams(qrPageQuery(containers));
+    assert.deepEqual(q.getAll("c"), ["box-1", "kueche", "kühlschrank"]);
+    assert.deepEqual(q.getAll("n"), ["Box 1", "Küche", "Kühlschrank"]);
+    assert.deepEqual(q.getAll("p"), ["", "", "Küche"]);
+    assert.equal(q.has("sel"), false);
+  });
+
+  it("Rundlauf qrPageQuery → parseQrPage, mit und ohne Auswahl", () => {
+    const all = parseQrPage("?" + qrPageQuery(containers));
+    assert.equal(all.selected, null);
+    assert.deepEqual(all.entries[2], { id: "kühlschrank", name: "Kühlschrank", where: "Küche" });
+    const one = parseQrPage("?" + qrPageQuery(containers, ["kueche"]));
+    assert.deepEqual([...one.selected], ["kueche"]);
+  });
+
+  it("parseQrPage: ungültige/doppelte IDs weg, fehlender Name = ID, fremde sel ignoriert", () => {
+    const r = parseQrPage("?c=a%2Fb&n=X&c=box&n=Box&c=box&n=Doppelt&c=&sel=gibts-nicht");
+    assert.deepEqual(r.entries, [{ id: "box", name: "Box", where: "" }]);
+    assert.deepEqual([...r.selected], []);
+    assert.deepEqual(parseQrPage("?c=solo").entries, [{ id: "solo", name: "solo", where: "" }]);
+    assert.deepEqual(parseQrPage("").entries, []);
   });
   it("containerUrl: mit Name, ohne Name, gleiche Seite", () => {
     assert.equal(

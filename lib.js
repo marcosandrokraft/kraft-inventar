@@ -104,19 +104,44 @@ export function containerIdFromScan(text, appHref) {
   return c && isValidId(c) ? c : null;
 }
 
-// Zeilen aus dem QR-Formular → [{id, name}]. Zeilen ohne verwertbaren Namen fallen weg,
-// doppelte IDs werden zusammengefasst.
-export function parseQrEntries(text) {
-  const seen = new Set();
-  const out = [];
-  for (const line of String(text).split("\n")) {
-    const name = line.trim().slice(0, MAX_NAME);
-    const id = slugify(name);
-    if (!name || !id || seen.has(id)) continue;
-    seen.add(id);
-    out.push({ id, name });
+// Query für qr.html: alle Behälter (nach Pfad sortiert) als c=ID&n=Name&p=Ort, dazu sel=ID für die
+// schon angehakten. Ohne `selected` sind auf der Druckseite alle angehakt. Ort = Pfad ohne den
+// Behälter selbst ("Küche › Kühlschrank"), leer bei oberster Ebene.
+export function qrPageQuery(containers, selected = []) {
+  const rows = [...containers.keys()].map((id) => {
+    const path = containerPath(id, containers);
+    return { id, name: containers.get(id)?.name || id, where: formatPath(path.slice(0, -1)), sort: formatPath(path) };
+  }).sort((a, b) => a.sort.localeCompare(b.sort, "de"));
+  const params = new URLSearchParams();
+  for (const r of rows) {
+    params.append("c", r.id);
+    params.append("n", r.name);
+    params.append("p", r.where);
   }
-  return out;
+  for (const id of selected) params.append("sel", id);
+  return params.toString();
+}
+
+// Gegenstück zu qrPageQuery: → { entries: [{ id, name, where }], selected: Set | null }.
+// `selected` ist null, wenn kein sel= dabei ist (= alle angehakt). IDs mit "/" oder leere IDs
+// fallen weg (wären keine gültigen Behälter-Links), doppelte IDs werden zusammengefasst.
+export function parseQrPage(search) {
+  const params = new URLSearchParams(search);
+  const ids = params.getAll("c");
+  const names = params.getAll("n");
+  const wheres = params.getAll("p");
+  const seen = new Set();
+  const entries = [];
+  ids.forEach((raw, i) => {
+    const id = raw.trim();
+    if (!id || id.includes("/") || id.length > 200 || seen.has(id)) return;
+    seen.add(id);
+    const name = (names[i] || "").trim().slice(0, MAX_NAME) || id;
+    const where = (wheres[i] || "").trim().slice(0, 500);
+    entries.push({ id, name, where });
+  });
+  const sel = params.getAll("sel").filter((id) => seen.has(id));
+  return { entries, selected: params.has("sel") ? new Set(sel) : null };
 }
 
 // Link, den ein QR-Code öffnet. Der Name wird mitgegeben, damit ein neu angelegter Behälter gleich

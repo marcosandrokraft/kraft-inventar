@@ -67,6 +67,7 @@ import {
   EXPIRY_WINDOWS,
   expiringItems,
   daysText,
+  qrPageQuery,
 } from "./lib.js";
 
 // Freistellungs-Bibliothek wird erst beim ersten Foto geladen. Als statischer Import würde ein
@@ -360,6 +361,7 @@ function watchContainers() {
       });
     });
     containersLoaded = true;
+    document.querySelectorAll("a[data-qr]").forEach(setQrHref);
     containerListeners.forEach((fn) => fn());
   }, (err) => {
     containersError = err;
@@ -384,6 +386,21 @@ function containersReady() {
     containerListeners.add(fn);
   });
 }
+
+// Links zur QR-Druckseite (a[data-qr]) übergeben immer alle Behälter; data-qr-sel = der Behälter,
+// der schon angehakt sein soll (sonst alle). Beim Klick neu berechnet, falls sich etwas geändert hat.
+function setQrHref(a) {
+  const sel = a.dataset.qrSel;
+  let containers = allContainers;
+  if (sel && !containers.has(sel)) {
+    containers = new Map(allContainers).set(sel, { name: a.dataset.qrName || sel });
+  }
+  a.href = `qr.html?${qrPageQuery(containers, sel ? [sel] : [])}`;
+}
+document.addEventListener("click", (e) => {
+  const a = e.target.closest?.("a[data-qr]");
+  if (a) setQrHref(a);
+});
 
 function pathLabel(id) {
   return formatPath(containerPath(id, allContainers));
@@ -1152,7 +1169,7 @@ function renderOverview() {
     <div class="list-links"><a class="chip" href="index.html?liste=ablauf">⏰ Läuft bald ab</a></div>
     <h1>Deine Behälter</h1>
     <div class="container-list" id="container-list"><p class="empty-hint">Lade…</p></div>
-    <p class="muted"><a id="qr-all" href="qr.html">🖨 QR-Codes für alle Behälter drucken</a></p>
+    <p class="muted"><a id="qr-all" href="qr.html" data-qr>🖨 QR-Codes drucken (Auswahl)</a></p>
     <form class="add-form" id="new-container-form">
       <input name="name" placeholder="Neuer Behälter (z.B. Kühlschrank)" maxlength="${MAX_NAME}" required />
       <select name="type" aria-label="Typ">${typeOptions()}</select>
@@ -1191,9 +1208,7 @@ function renderOverview() {
     }
     list.innerHTML = "";
     const all = [...allContainers].sort((a, b) => pathLabel(a[0]).localeCompare(pathLabel(b[0]), "de"));
-    const qrParams = new URLSearchParams();
-    for (const [cid, c] of all) { qrParams.append("c", cid); qrParams.append("n", c.name); }
-    document.getElementById("qr-all").href = `qr.html?${qrParams}`;
+    setQrHref(document.getElementById("qr-all"));
     const top = all.filter(([id]) => isTopLevel(id, allContainers))
       .sort((a, b) => a[1].name.localeCompare(b[1].name, "de"));
     for (const [id] of top) list.appendChild(containerCard(id, id));
@@ -1446,7 +1461,7 @@ function renderContainer(id) {
       <h1 id="container-title">…</h1>
       <button type="button" class="link-btn" id="select-btn" aria-label="Mehrere Artikel auswählen" title="Auswählen und verschieben">☑</button>
       <button type="button" class="link-btn" id="edit-btn" aria-label="Behälter bearbeiten" title="Umbenennen, Typ, liegt in, löschen">✏️</button>
-      <a class="link-btn" id="qr-link" href="qr.html" aria-label="QR-Code für diesen Behälter">QR</a>
+      <a class="link-btn" id="qr-link" href="qr.html" data-qr aria-label="QR-Code für diesen Behälter">QR</a>
     </div>
     <small class="muted" id="container-type"></small>
     <div id="children" class="container-list children" hidden></div>
@@ -1560,7 +1575,10 @@ function renderContainer(id) {
     }
     titleEl.textContent = containerName;
     document.title = `${containerName} – Vorrat`;
-    document.getElementById("qr-link").href = `qr.html?c=${encodeURIComponent(id)}&n=${encodeURIComponent(containerName)}`;
+    const qrLink = document.getElementById("qr-link");
+    qrLink.dataset.qrSel = id;
+    qrLink.dataset.qrName = containerName;
+    setQrHref(qrLink);
   }, (err) => showError(itemsEl, err));
 
   // Pfad oben, Typ, Unterbehälter.

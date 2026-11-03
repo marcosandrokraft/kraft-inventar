@@ -9,18 +9,26 @@
 <link rel="stylesheet" href="style.css" />
 <link rel="icon" href="icon.svg" />
 <style>
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--qr-size, 160px), 1fr)); gap: 1rem; margin-top: 1rem; }
-  .qr-card { background: #fff; color: #000; border: 1px dashed #bbb; border-radius: 10px; padding: 0.6rem; text-align: center; break-inside: avoid; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--qr-size, 140px), 1fr)); gap: 1rem; margin-top: 1rem; }
+  .qr-card { position: relative; background: #fff; color: #000; border: 1px dashed #bbb; border-radius: 10px; padding: 0.6rem; text-align: center; break-inside: avoid; cursor: pointer; }
+  .qr-card:not(.selected) { opacity: 0.4; }
+  .qr-card.selected { border: 2px solid var(--accent, #2b6cb0); }
+  .qr-card input { position: absolute; top: 0.4rem; left: 0.4rem; width: 28px; height: 28px; margin: 0; accent-color: var(--accent, #2b6cb0); }
   .qr-card svg { width: 100%; height: auto; display: block; }
   .qr-card .label { margin-top: 0.3rem; font-weight: 700; font-size: 1.05rem; word-break: break-word; }
+  .qr-card .where { font-size: 0.75rem; color: #444; word-break: break-word; }
   .qr-card .url { font-size: 0.6rem; color: #555; word-break: break-all; }
-  .qr-options { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
+  .qr-toolbar { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; }
+  .qr-toolbar button, .qr-toolbar select, .qr-toolbar input { min-height: 44px; }
+  .qr-toolbar input[type="search"] { flex: 1 1 12rem; font-size: 16px; padding: 0 0.6rem; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+  .qr-card[hidden] { display: none; }
   @media print {
     body { background: #fff; padding: 0; }
-    header, form, .muted, .no-print { display: none !important; }
+    header, .muted, .no-print, .qr-card input { display: none !important; }
     main { max-width: none; padding: 0; }
     .grid { gap: 4mm; grid-template-columns: repeat(auto-fill, minmax(var(--qr-print, 45mm), 1fr)); }
-    .qr-card { border: 1px dashed #999; }
+    .qr-card, .qr-card.selected { opacity: 1; border: 1px dashed #999; }
+    .qr-card:not(.selected), .qr-card[hidden] { display: none !important; }
   }
 </style>
 </head>
@@ -29,24 +37,25 @@
   <a href="index.html">🏠 Übersicht</a>
 </header>
 <main>
-  <h1>QR-Codes zum Drucken</h1>
-  <p class="muted">Ein Behälter pro Zeile (Anzeigename). Der Link wird automatisch aus dem Namen erzeugt. Danach ausdrucken
-    (Druckbogen), ausschneiden und auf den Behälter kleben. Die QR-Codes werden direkt hier im Browser erzeugt – es
-    werden keine Daten an fremde Dienste geschickt.</p>
-  <form class="add-form" id="gen-form" style="flex-direction:column; align-items:stretch;">
-    <textarea name="names" rows="5" maxlength="10000" placeholder="Kühlschrank&#10;Gefrierfach&#10;Vorratsschrank&#10;Kleiderschrank Marco" style="width:100%; padding:0.6rem; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text);"></textarea>
-    <div class="qr-options">
-      <label class="muted">Grösse beim Drucken
-        <select name="size">
-          <option value="35mm">klein (3.5 cm)</option>
-          <option value="45mm" selected>mittel (4.5 cm)</option>
-          <option value="65mm">gross (6.5 cm)</option>
-        </select>
-      </label>
-      <button type="submit">QR-Codes erzeugen</button>
-      <button type="button" id="print-btn" class="no-print" hidden>🖨 Drucken</button>
-    </div>
-  </form>
+  <h1>QR-Codes drucken</h1>
+  <p class="muted">Jeder Behälter hat einen QR-Code. Hake die an, die du drucken willst, dann ausschneiden und
+    aufkleben. Neue Behälter legst du in der App an, danach erscheinen sie hier. Die QR-Codes entstehen direkt
+    im Browser, es gehen keine Daten an fremde Dienste.</p>
+  <div class="qr-toolbar no-print" id="toolbar" hidden>
+    <input type="search" id="filter" placeholder="Filtern …" aria-label="Behälter filtern" autocomplete="off" />
+    <button type="button" class="secondary" id="sel-all">Alle</button>
+    <button type="button" class="secondary" id="sel-none">Keine</button>
+    <label class="muted">Grösse
+      <select id="size">
+        <option value="35mm">klein (3.5 cm)</option>
+        <option value="45mm" selected>mittel (4.5 cm)</option>
+        <option value="65mm">gross (6.5 cm)</option>
+      </select>
+    </label>
+    <button type="button" id="print-btn">🖨 Drucken (<span id="count">0</span>)</button>
+  </div>
+  <p class="empty-hint" id="empty" hidden>Öffne diese Seite über die App (oben „QR-Codes drucken“), dann erscheinen
+    hier alle Behälter.<br><a href="index.html">Zur Übersicht</a></p>
   <div class="grid" id="grid"></div>
 </main>
 <script src="vendor/qrcode-generator-1.4.4.js"></script>
