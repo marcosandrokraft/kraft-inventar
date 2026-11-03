@@ -43,13 +43,13 @@ die Regeln in der Konsole erneut veröffentlichen.
 
 1. Behälter in der App anlegen (Übersicht → "Neuer Behälter"). Jeder Behälter hat damit automatisch
    einen QR-Code.
-2. In der App oben "QR-Codes drucken" (oder "🖨 QR-Codes drucken (Auswahl)" in der Übersicht) antippen:
+2. In der App oben "QR-Codes drucken" (oder "QR-Codes drucken (Auswahl)" in der Übersicht) antippen:
    Die Druckseite zeigt alle Behälter, alle sind angehakt. Über "QR" in einem Behälter ist nur dieser
    angehakt. Mit "Alle"/"Keine", Filter und Antippen auswählen, was gedruckt werden soll.
 3. Druckgrösse wählen, "Drucken", QR-Codes ausschneiden und auf die Behälter/Schränke kleben.
    Der QR-Code enthält nur die feste ID des Behälters (`index.html?c=<id>`). Er bleibt gleich, auch wenn
    der Behälter umbenannt, verschoben oder befüllt wird. Ältere Codes mit `&n=Name` funktionieren weiter.
-   Scannen: "📷" unten öffnet direkt die Kamera, auf Android über den eingebauten Erkenner, auf
+   "Scannen" unten öffnet direkt die Kamera, auf Android über den eingebauten Erkenner, auf
    iPhone/Firefox über jsQR (`vendor/jsqr-1.4.0/`, wird erst beim ersten Scan geladen).
    Die Codes werden lokal im Browser erzeugt (kein Fremddienst).
 4. Tipp: Statt/zusätzlich zum QR-Code kann derselbe Link auf einen NFC-Sticker geschrieben werden
@@ -58,17 +58,17 @@ die Regeln in der Konsole erneut veröffentlichen.
 ## 5. Benutzung
 
 - QR-Code am Kühlschrank scannen → öffnet direkt die Artikelliste dieses Kühlschranks
-  (Kamera-App, oder in der App "📷 Scan" – auf Android/Chrome).
+  (Kamera-App, oder in der App "Scan" – auf Android/Chrome).
 - **Wo ist …?** Suchfeld oben in der Übersicht durchsucht alle Behälter (Gross/klein und Umlaute
   egal). Ein Treffer öffnet den Behälter und markiert den Artikel.
-- Artikel hinzufügen über das Formular unten: optional 📷 Foto (aufnehmen oder aus der Galerie
+- Artikel hinzufügen über das Formular unten: optional Foto (Kamera-Symbol; aufnehmen oder aus der Galerie
   hochladen), Name, Anzahl, Einheit. Der Artikel erscheint sofort, das Foto wird im Hintergrund
-  verarbeitet (⏳) und dann ergänzt.
+  verarbeitet (Sanduhr) und dann ergänzt.
 - Gibt es den Artikel schon, wird die Menge addiert (bei anderer Einheit fragt die App nach).
 - Menge über +/− anpassen oder die Zahl antippen und direkt eingeben; bei 0 wird der Artikel entfernt.
-- 🗑 entfernt einen Artikel sofort – unten erscheint kurz "Rückgängig".
+- Papierkorb entfernt einen Artikel: erster Tipp fragt "Löschen?", zweiter Tipp löscht – unten erscheint kurz "Rückgängig".
 - Artikelnamen antippen → Details: Foto, **Verschieben** in einen anderen Behälter, Entfernen.
-- ✏️ neben dem Behälternamen: umbenennen, Typ (Raum/Schrank/Fach/Box, optional), **"liegt in"**
+- Stift neben dem Behälternamen: umbenennen, Typ (Raum/Schrank/Fach/Box, optional), **"liegt in"**
   (z.B. Gemüsefach liegt im Kühlschrank, der in der Küche steht) und **löschen** (nur wenn leer,
   mit Rückgängig). Der QR-Code bleibt gültig. Ebenen dürfen fehlen: eine Box direkt in einem Raum
   oder ganz ohne Ort ist erlaubt.
@@ -76,22 +76,22 @@ die Regeln in der Konsole erneut veröffentlichen.
   ganz unten "+ Behälter hier hineinlegen". Die Übersicht zeigt nur die oberste Ebene, die Suche
   zeigt den ganzen Pfad.
 - Einheiten: Stk, Packung, Flasche, Dose, Glas, g, kg, ml, l. Bei g und ml ändern +/− um 50.
-- **MHD** (optional): Artikel antippen → 📅 MHD → +3 Tage, +1 Woche, +1 Monat, Kalender oder
+- **MHD** (optional): Artikel antippen → MHD → +3 Tage, +1 Woche, +1 Monat, Kalender oder
   entfernen. "Läuft bald ab" (≤ 3 Tage) wird orange, "abgelaufen" rot markiert.
   **Experiment** "Datum mit Kamera lesen": Foto der Packung → liest zuerst einen GS1-Code
   (DataMatrix/QR mit Verfallsdatum, nur wo der Browser BarcodeDetector kann, v.a. Android), sonst
   Texterkennung (tesseract.js, lädt beim ersten Mal ca. 4 MB). **Unzuverlässig** – Prägedruck,
   Spiegelungen, gewölbte Dosen und kleine Schrift werden oft falsch oder gar nicht erkannt. Der
   Vorschlag wird nie automatisch übernommen, du bestätigst ihn immer.
-- ☑ neben dem Behälternamen: **Umzugsmodus** – mehrere Artikel ankreuzen und auf einmal
+- Häkchen-Knopf neben dem Behälternamen: **Umzugsmodus** – mehrere Artikel ankreuzen und auf einmal
   verschieben (mit Rückgängig). Auf Android/Chrome kann das Ziel auch per QR-Code gescannt werden
-  ("📷 Ziel-QR-Code scannen"; nur bestehende Behälter, der Scan wählt das Ziel nur aus).
+  ("Ziel-QR-Code scannen"; nur bestehende Behälter, der Scan wählt das Ziel nur aus).
 - Leiste unten: Übersicht, Suchen, Scannen (Android/Chrome), **Läuft ab** (alle Artikel mit MHD
   abgelaufen oder in ≤ 3 bzw. ≤ 7 Tagen, nach Datum, mit Behälterpfad; antippen öffnet den Behälter),
   **Zuletzt** (zuletzt geöffnete Behälter, nur auf diesem Gerät gespeichert).
 - Ohne Netz: Zuletzt angesehene Inhalte bleiben sichtbar, Änderungen werden später übertragen
   ("Offline" oben). Abmelden löscht die Offline-Kopie auf dem Gerät.
-- Vorschaubild links am Artikel: ohne Foto → 📷 antippen fügt eins hinzu; mit Foto → Grossansicht
+- Vorschaubild links am Artikel: ohne Foto → Kamera-Symbol antippen fügt eins hinzu; mit Foto → Grossansicht
   mit "Foto ändern".
 - Fotos werden automatisch freigestellt (Hintergrund entfernt), auf das Objekt zugeschnitten, zentriert
   auf einen einheitlichen hellgrauen, quadratischen Hintergrund gelegt, verkleinert (max. 480 px,
@@ -103,7 +103,7 @@ die Regeln in der Konsole erneut veröffentlichen.
     Browser zwischengespeichert, ein Foto dauert dann nur noch einige Sekunden.
   - Klappt die Freistellung mal nicht (z.B. sehr altes Handy/Browser ohne WebAssembly), wird automatisch
     das normale (nicht freigestellte) Foto gespeichert, statt dass gar nichts passiert.
-- Über "🏠 Übersicht" (oben oder unten) siehst du alle Behälter der obersten Ebene und kannst auch dort neue anlegen
+- Über "Übersicht" (oben oder unten) siehst du alle Behälter der obersten Ebene und kannst auch dort neue anlegen
   (z.B. falls du mal ohne QR-Code schnell etwas eintragen willst).
 - "Zum Home-Bildschirm hinzufügen" (iOS/Android-Browser-Menü) macht daraus ein App-Icon ohne Appstore.
 

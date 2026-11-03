@@ -300,7 +300,7 @@ function itemRef(containerId, itemId) {
   return doc(db, "containers", containerId, "items", itemId);
 }
 
-// Artikel, deren Foto gerade verarbeitet wird ("containerId/itemId") – zeigt ⏳ statt 📷.
+// Artikel, deren Foto gerade verarbeitet wird ("containerId/itemId") – zeigt die Sanduhr statt der Kamera.
 const photosInProgress = new Set();
 let rerenderItems = () => {};
 
@@ -438,18 +438,41 @@ function typeLabel(type) {
   return CONTAINER_TYPES[type] || "";
 }
 
-// Kleine Strich-Icons pro Typ (feste SVGs, keine Nutzerdaten), Farbe über currentColor.
+// Kleine Strich-Icons (feste SVGs, keine Nutzerdaten), Farbe über currentColor, rein dekorativ
+// (aria-hidden) – Knöpfe nur mit Icon brauchen deshalb ein aria-label. Die Leiste unten steht als
+// Inline-SVG in index.html (gleiche Pfade wie hier).
 const TYPE_ICON_PATHS = {
   raum: '<path d="M5 21V4a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v17"/><path d="M3 21h18"/><circle cx="15" cy="12.5" r="1" fill="currentColor"/>',
   schrank: '<rect x="4" y="2.5" width="16" height="17" rx="1.5"/><path d="M12 2.5v17M10 10v2.5M14 10v2.5M6.5 19.5v2M17.5 19.5v2"/>',
   fach: '<rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 12h18M10 8h4M10 16h4"/>',
   box: '<path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z"/><path d="m3 7.5 9 4.5 9-4.5M12 12v9"/>',
 };
+const ICON_PATHS = {
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4"/>',
+  scan: '<path d="M3 8V5.5A2.5 2.5 0 0 1 5.5 3H8M16 3h2.5A2.5 2.5 0 0 1 21 5.5V8M21 16v2.5a2.5 2.5 0 0 1-2.5 2.5H16M8 21H5.5A2.5 2.5 0 0 1 3 18.5V16"/><path d="M7 12h10"/>',
+  camera: '<path d="M4.5 7.5h2.8L9 5h6l1.7 2.5h2.8A1.5 1.5 0 0 1 21 9v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18V9a1.5 1.5 0 0 1 1.5-1.5z"/><circle cx="12" cy="13" r="3.5"/>',
+  alarm: '<circle cx="12" cy="13" r="7.5"/><path d="M12 9.5V13l2.5 2M3.5 5.5l3-2.5M20.5 5.5l-3-2.5"/>',
+  calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+  trash: '<path d="M4 7h16M9.5 7V4.5h5V7"/><path d="m6 7 .9 12.6a1.5 1.5 0 0 0 1.5 1.4h7.2a1.5 1.5 0 0 0 1.5-1.4L18 7"/><path d="M10 11v6M14 11v6"/>',
+  edit: '<path d="M4 20h4L19.3 8.7a2.1 2.1 0 0 0 0-3l-1-1a2.1 2.1 0 0 0-3 0L4 16z"/><path d="m13.5 6.5 4 4"/>',
+  select: '<rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="m8 12.2 2.8 2.8L16.2 9"/>',
+  qr: '<rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1"/><path d="M14 14h2.5v2.5H14zM20.5 14v.01M14 20.5v.01M20.5 20.5h-1.5M18.5 17.5v.01"/>',
+  move: '<path d="M14.5 4.5 19 9l-4.5 4.5"/><path d="M19 9h-9a5.5 5.5 0 0 0-5.5 5.5V20"/>',
+  close: '<path d="m6 6 12 12M18 6 6 18"/>',
+  print: '<path d="M7 9V3.5h10V9"/><rect x="3.5" y="9" width="17" height="8" rx="2"/><path d="M7 14h10v6.5H7z"/>',
+  hourglass: '<path d="M6.5 3.5h11M6.5 20.5h11"/><path d="M8 3.5c0 4 4 5.5 4 8.5s-4 4.5-4 8.5M16 3.5c0 4-4 5.5-4 8.5s4 4.5 4 8.5"/>',
+  box: TYPE_ICON_PATHS.box,
+};
+function svgIcon(paths, cls) {
+  return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${paths}</svg>`;
+}
+// icon("trash") → SVG-Markup; nur feste Namen aus ICON_PATHS.
+function icon(name) {
+  return svgIcon(ICON_PATHS[name], "icon");
+}
 function typeIcon(type) {
   const paths = TYPE_ICON_PATHS[type];
-  return paths
-    ? `<svg class="type-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`
-    : "";
+  return paths ? svgIcon(paths, "type-icon") : "";
 }
 
 // --- MHD (Mindesthaltbarkeitsdatum) ---
@@ -490,7 +513,7 @@ function showMhdDialog(containerId, itemId, item) {
       <button type="button" data-action="date">OK</button>
     </div>
     <div class="photo-actions">
-      <button type="button" data-action="camera" class="secondary">📷 Datum mit Kamera lesen (Experiment)</button>
+      <button type="button" data-action="camera" class="secondary">${icon("camera")}Datum mit Kamera lesen (Experiment)</button>
     </div>
     <div class="photo-actions">
       ${current ? `<button type="button" data-action="clear" class="danger">MHD entfernen</button>` : ""}
@@ -620,12 +643,12 @@ function showItemDetails(containerId, itemId, item) {
     <span class="muted">${escapeHtml(String(item.qty ?? 1))} ${escapeHtml(item.unit || "")}</span>
     <span class="muted">${isValidIsoDate(item.mhd) ? mhdBadge(item.mhd) : "MHD: –"}</span>
     <div class="photo-actions">
-      <button type="button" data-action="change">📷 ${hasPhoto ? "Foto ändern" : "Foto hinzufügen"}</button>
-      <button type="button" data-action="mhd">📅 MHD</button>
+      <button type="button" data-action="change" class="neutral">${icon("camera")}${hasPhoto ? "Foto ändern" : "Foto hinzufügen"}</button>
+      <button type="button" data-action="mhd" class="neutral">${icon("calendar")}MHD</button>
     </div>
     <div class="photo-actions">
-      <button type="button" data-action="move">↪ Verschieben</button>
-      <button type="button" data-action="del" class="danger">🗑 Entfernen</button>
+      <button type="button" data-action="move" class="neutral">${icon("move")}Verschieben</button>
+      <button type="button" data-action="del" class="danger">${icon("trash")}Entfernen</button>
     </div>
     <div class="photo-actions">
       <button type="button" data-action="close" class="secondary">Schliessen</button>
@@ -666,7 +689,7 @@ async function showMoveDialog(fromId, entries, onDone = () => {}) {
     <strong></strong>
     <label class="muted" for="move-target">Verschieben nach:</label>
     <select id="move-target" class="big-select"><option value="">Lade…</option></select>
-    ${canScan ? `<div class="photo-actions"><button type="button" data-action="scan" class="secondary" disabled>📷 Ziel-QR-Code scannen</button></div>` : ""}
+    ${canScan ? `<div class="photo-actions"><button type="button" data-action="scan" class="secondary" disabled>${icon("scan")}Ziel-QR-Code scannen</button></div>` : ""}
     <small class="muted" id="move-hint" role="status"></small>
     <div class="photo-actions">
       <button type="button" data-action="ok" disabled>Verschieben</button>
@@ -1254,16 +1277,16 @@ function containerCard(id, extra = "") {
 function renderOverview() {
   main.innerHTML = `
     <div class="search-row">
-      <input type="search" id="search" class="search-input" placeholder="🔍 Wo ist …? Artikel suchen"
-        autocomplete="off" enterkeyhint="search" aria-label="Artikel suchen" maxlength="${MAX_NAME}" />
-      ${canScan ? `<button type="button" id="scan-btn" class="scan-btn" aria-label="QR-Code scannen">📷 Scan</button>` : ""}
+      <div class="search-field">${icon("search")}<input type="search" id="search" class="search-input" placeholder="Wo ist …?"
+        autocomplete="off" enterkeyhint="search" aria-label="Artikel suchen" maxlength="${MAX_NAME}" /></div>
+      ${canScan ? `<button type="button" id="scan-btn" class="scan-btn" aria-label="QR-Code scannen">${icon("scan")}Scan</button>` : ""}
     </div>
     <div id="search-results" class="search-results" hidden></div>
     <div id="recent" class="recent-chips" hidden></div>
-    <div class="list-links"><a class="chip" href="index.html?liste=ablauf">⏰ Läuft bald ab</a></div>
+    <div class="list-links"><a class="chip" href="index.html?liste=ablauf">${icon("alarm")}Läuft bald ab</a></div>
     <h1>Deine Behälter</h1>
     <div class="container-list" id="container-list"><p class="empty-hint">Lade…</p></div>
-    <p class="muted"><a id="qr-all" href="qr.html" data-qr>🖨 QR-Codes drucken (Auswahl)</a></p>
+    <p class="muted"><a id="qr-all" href="qr.html" data-qr>${icon("print")}QR-Codes drucken (Auswahl)</a></p>
     <form class="add-form" id="new-container-form">
       <input name="name" placeholder="Neuer Behälter (z.B. Kühlschrank)" maxlength="${MAX_NAME}" required />
       <select name="type" aria-label="Typ">${typeOptions()}</select>
@@ -1345,7 +1368,7 @@ function renderOverview() {
       a.className = "card result";
       a.href = `index.html?c=${encodeURIComponent(it.containerId)}#i=${encodeURIComponent(it.id)}`;
       a.innerHTML = `
-        <span class="thumb-btn small">${isSafePhoto(it.photo) ? `<img class="thumb" alt="" decoding="async" />` : "📦"}</span>
+        <span class="thumb-btn small">${isSafePhoto(it.photo) ? `<img class="thumb" alt="" decoding="async" />` : icon("box")}</span>
         <div class="name"><strong>${escapeHtml(it.name)}</strong><small>${escapeHtml(String(it.qty ?? 1))} ${escapeHtml(it.unit || "")} · in <b>${escapeHtml(it.containerName)}</b>${withSpace(mhdBadge(it.mhd))}</small></div>
         <div aria-hidden="true">›</div>`;
       const img = a.querySelector("img");
@@ -1447,7 +1470,7 @@ function renderExpiring() {
       a.dataset.cid = it.containerId;
       a.href = `index.html?c=${encodeURIComponent(it.containerId)}#i=${encodeURIComponent(it.id)}`;
       a.innerHTML = `
-        <span class="thumb-btn small">${isSafePhoto(it.photo) ? `<img class="thumb" alt="" decoding="async" />` : "📦"}</span>
+        <span class="thumb-btn small">${isSafePhoto(it.photo) ? `<img class="thumb" alt="" decoding="async" />` : icon("box")}</span>
         <div class="name"><strong>${escapeHtml(it.name)}</strong>
           <small><span class="mhd mhd-${status}">${escapeHtml(when)} · ${escapeHtml(formatDate(it.mhd))}</span></small>
           <small>${escapeHtml(String(it.qty ?? 1))} ${escapeHtml(it.unit || "")} · in <b>${escapeHtml(pathLabel(it.containerId))}</b></small></div>
@@ -1493,7 +1516,7 @@ function showContainerSettings(id, onDeleted) {
       <button type="button" data-action="close" class="secondary">Abbrechen</button>
     </div>
     <div class="photo-actions">
-      ${canDelete ? `<button type="button" data-action="delete" class="danger">🗑 Behälter löschen</button>` : ""}
+      ${canDelete ? `<button type="button" data-action="delete" class="danger">${icon("trash")}Behälter löschen</button>` : ""}
     </div>
     <small class="muted" id="cs-hint">Der QR-Code bleibt beim Umbenennen und Verschieben gültig.</small>
   `);
@@ -1554,25 +1577,25 @@ function renderContainer(id) {
     <nav class="breadcrumb" id="breadcrumb" aria-label="Pfad" hidden></nav>
     <div class="title-row">
       <h1 id="container-title">…</h1>
-      <button type="button" class="link-btn" id="select-btn" aria-label="Mehrere Artikel auswählen" title="Auswählen und verschieben">☑</button>
-      <button type="button" class="link-btn" id="edit-btn" aria-label="Behälter bearbeiten" title="Umbenennen, Typ, liegt in, löschen">✏️</button>
-      <a class="link-btn" id="qr-link" href="qr.html" data-qr aria-label="QR-Code für diesen Behälter">QR</a>
+      <button type="button" class="link-btn" id="select-btn" aria-label="Mehrere Artikel auswählen" title="Auswählen und verschieben">${icon("select")}</button>
+      <button type="button" class="link-btn" id="edit-btn" aria-label="Behälter bearbeiten" title="Umbenennen, Typ, liegt in, löschen">${icon("edit")}</button>
+      <a class="link-btn" id="qr-link" href="qr.html" data-qr aria-label="QR-Code für diesen Behälter">${icon("qr")}</a>
     </div>
     <small class="muted" id="container-type"></small>
     <div id="children" class="container-list children" hidden></div>
-    <input type="search" id="item-filter" class="search-input" placeholder="🔍 In diesem Behälter filtern"
-      autocomplete="off" aria-label="Artikel filtern" hidden />
+    <div class="search-field" hidden>${icon("search")}<input type="search" id="item-filter" class="search-input"
+      placeholder="In diesem Behälter filtern" autocomplete="off" aria-label="Artikel filtern" /></div>
     <div id="items"><p class="empty-hint">Lade…</p></div>
     <div class="select-bar" id="select-bar" hidden>
       <span id="select-count">0 ausgewählt</span>
       <button type="button" id="select-all" class="secondary">Alle</button>
-      <button type="button" id="select-move" disabled>↪ Verschieben</button>
-      <button type="button" id="select-cancel" class="secondary" aria-label="Auswahl beenden">✕</button>
+      <button type="button" id="select-move" disabled>${icon("move")}Verschieben</button>
+      <button type="button" id="select-cancel" class="secondary" aria-label="Auswahl beenden">${icon("close")}</button>
     </div>
     <form class="add-form" id="add-item-form">
       <label class="photo-pick" title="Foto aufnehmen oder hochladen">
-        <input name="photo" type="file" accept="image/*" hidden />
-        <span class="photo-pick-preview">📷</span>
+        <input name="photo" type="file" accept="image/*" aria-label="Foto aufnehmen oder hochladen" hidden />
+        <span class="photo-pick-preview">${icon("camera")}</span>
       </label>
       <input name="name" placeholder="Artikel (z.B. Milch)" list="item-names" maxlength="${MAX_NAME}"
         autocomplete="off" enterkeyhint="done" required />
@@ -1614,7 +1637,7 @@ function renderContainer(id) {
   function resetPhotoPreview() {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     previewUrl = null;
-    photoPreview.textContent = "📷";
+    photoPreview.innerHTML = icon("camera");
   }
   form.photo.addEventListener("change", () => {
     resetPhotoPreview();
@@ -1827,7 +1850,7 @@ function renderContainer(id) {
       .map((it) => `<option value="${escapeHtml(it.name)}"></option>`).join("");
     updateAddHint();
     updateSelectBar();
-    filterInput.hidden = snap.size < FILTER_THRESHOLD && !filterInput.value;
+    filterInput.parentElement.hidden = snap.size < FILTER_THRESHOLD && !filterInput.value; // .search-field mit Lupe
 
     visibleIds = [];
     if (snap.empty) {
@@ -1867,8 +1890,8 @@ function renderContainer(id) {
       card.className = "card";
       card.dataset.id = itemId;
       card.innerHTML = `
-        <button type="button" class="thumb-btn" data-action="photo" aria-label="${hasPhoto ? "Foto anzeigen" : "Foto hinzufügen"}">
-          ${busy ? `<span class="spinner">⏳</span>` : hasPhoto ? `<img class="thumb" alt="" decoding="async" />` : "📷"}
+        <button type="button" class="thumb-btn${hasPhoto || busy ? "" : " no-photo"}" data-action="photo" aria-label="${hasPhoto ? "Foto anzeigen" : "Foto hinzufügen"}">
+          ${busy ? `<span class="spinner">${icon("hourglass")}</span>` : hasPhoto ? `<img class="thumb" alt="" decoding="async" />` : icon("camera")}
         </button>
         <button type="button" class="name name-btn" data-action="details" aria-label="Details zu ${escapeHtml(item.name)}">
           <strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.unit || "")}${withSpace(mhdBadge(item.mhd))}</small>
@@ -1878,7 +1901,7 @@ function renderContainer(id) {
           <button type="button" class="qty-value" data-action="set" aria-label="Menge eingeben">${escapeHtml(String(item.qty ?? 1))}</button>
           <button type="button" class="round" data-action="inc" aria-label="${step === 1 ? "Eins mehr" : `${step} mehr`}">+</button>
         </div>
-        <button type="button" class="delete" data-action="del" aria-label="Entfernen">🗑</button>
+        <button type="button" class="delete" data-action="del" aria-label="Entfernen">${icon("trash")}</button>
       `;
       const thumb = card.querySelector("img.thumb");
       if (thumb) thumb.src = item.photo;

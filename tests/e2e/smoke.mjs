@@ -1078,7 +1078,10 @@ test("25 Papierkorb: erster Tipp fragt nach, erst zweiter Tipp löscht, dann Rü
   assertEqual(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "keine horizontale Scrollbar");
   await page.waitForTimeout(300);
   assert(!(await t.writes()).some((w) => w.op === "delete"), "nach einem Tipp nichts gelöscht");
-  await waitUntil(page, () => document.querySelector('#items .card[data-id="milch"] [data-action="del"]').textContent === "🗑", { timeout: 6000 });
+  await waitUntil(page, () => {
+    const b = document.querySelector('#items .card[data-id="milch"] [data-action="del"]');
+    return !b.classList.contains("confirm") && b.querySelector("svg.icon") && b.textContent.trim() === "" && b.getAttribute("aria-label") === "Entfernen";
+  }, { timeout: 6000 });
 
   // Zwei Tipps: gelöscht, mit Rückgängig.
   await del.tap();
