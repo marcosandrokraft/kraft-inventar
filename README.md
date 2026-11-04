@@ -115,6 +115,7 @@ die Regeln in der Konsole erneut veröffentlichen.
 - `ocr.js` – Experiment Texterkennung fürs MHD (lädt tesseract.js erst bei Bedarf)
 - `vendor/firebase-10.14.1/` – Firebase-Bibliotheken, selbst gehostet (Apache-2.0, siehe README.txt dort)
 - `qr.html` / `qr.js` / `vendor/qrcode-generator-1.4.4.js` – QR-Code-Druckbogen
+- `vendor/fonts/manrope/` – Schrift Manrope, selbst gehostet (SIL OFL 1.1, Herkunft/Hashes in README.txt dort)
 - `register-sw.js` – registriert den Service Worker
 - `tests/`, `package.json`, `firebase.json` – nur für Tests (siehe [TESTS.md](TESTS.md)), die App
   selbst braucht keinen Build-Schritt
