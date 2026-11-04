@@ -16,8 +16,9 @@
 -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://staticimgly.com 'wasm-unsafe-eval' 'unsafe-eval' blob:; connect-src 'self' https://*.googleapis.com https://www.google.com https://*.firebaseapp.com https://cdn.jsdelivr.net https://staticimgly.com data: blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; frame-src https://*.firebaseapp.com https://www.google.com https://recaptcha.google.com; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'" />
 <title>Vorrat</title>
-<meta name="theme-color" content="#f2f4f3" media="(prefers-color-scheme: light)" />
-<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+<!-- = Marine-Kopf (--hero in style.css), damit die Statusleiste nahtlos anschliesst -->
+<meta name="theme-color" content="#0F1D30" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#18243A" media="(prefers-color-scheme: dark)" />
 <link rel="manifest" href="manifest.json" />
 <link rel="icon" href="icon.svg" />
 <link rel="apple-touch-icon" href="icon.svg" />
@@ -28,6 +29,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-title" content="Vorrat" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<link rel="preload" href="vendor/fonts/manrope/manrope-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
