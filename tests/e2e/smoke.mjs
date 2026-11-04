@@ -1101,6 +1101,75 @@ test("25 Papierkorb: erster Tipp fragt nach, erst zweiter Tipp löscht, dann Rü
   await t.done();
 });
 
+test("26 Kopf im Behälter: Artikelanzahl live, Überschrift 'Artikel' nur neben 'Darin', Schrift Manrope", async () => {
+  const t = await open("index.html?c=box-1", {
+    seed: {
+      "containers/box-1": { name: "Box 1" },
+      "containers/box-1/items/milch": { name: "Milch", qty: 2, unit: "Stk" },
+    },
+    viewport: { width: 360, height: 740 }, isMobile: true, hasTouch: true,
+  });
+  const { page } = t;
+  const count = () => page.evaluate(() => {
+    const el = document.getElementById("item-count");
+    return el.hidden ? null : el.textContent;
+  });
+  await page.waitForSelector('#items .card[data-id="milch"]');
+  assertEqual(await count(), "1 Artikel", "ein Artikel");
+  assert(await page.locator("#items-heading").isHidden(), "ohne 'Darin' keine Überschrift 'Artikel'");
+
+  // Hinzufügen zählt sofort mit; gleicher Name addiert nur die Menge (bleibt 1 Artikel).
+  await page.fill('#add-item-form input[name="name"]', "Reis");
+  await page.click('#add-item-form button[type="submit"]');
+  await page.waitForSelector('#items .card[data-id="reis"]');
+  assertEqual(await count(), "2 Artikel", "nach Hinzufügen");
+  await page.fill('#add-item-form input[name="name"]', "Milch");
+  await page.click('#add-item-form button[type="submit"]');
+  await waitUntil(page, () => document.querySelector('#items .card[data-id="milch"] .qty-value').textContent === "3");
+  assertEqual(await count(), "2 Artikel", "Menge addiert, Anzahl gleich");
+
+  // Entfernen (zwei Tipps) zählt herunter; leer = keine Anzahl im Kopf.
+  for (const [id, expected] of [["milch", "1 Artikel"], ["reis", null]]) {
+    const del = card(page, id).locator('[data-action="del"]');
+    await del.tap();
+    await del.tap();
+    await card(page, id).waitFor({ state: "detached" });
+    assertEqual(await count(), expected, `nach Entfernen von ${id}`);
+  }
+
+  // Schrift: Manrope aus vendor/fonts wird wirklich verwendet.
+  const font = await page.evaluate(async () => {
+    await document.fonts.ready;
+    return {
+      family: getComputedStyle(document.body).fontFamily,
+      loaded: [...document.fonts].some((f) => f.family.replace(/"/g, "") === "Manrope" && f.status === "loaded"),
+      url: performance.getEntriesByType("resource").map((e) => e.name).find((n) => n.endsWith(".woff2")) || "",
+    };
+  });
+  assert(font.family.startsWith('"Manrope"') || font.family.startsWith("Manrope"), `Schrift: ${font.family}`);
+  assert(font.loaded, "Manrope geladen");
+  assert(font.url.endsWith("/vendor/fonts/manrope/manrope-latin-wght-normal.woff2"), `Schriftdatei: ${font.url}`);
+
+  await t.done();
+
+  // Mit Unterbehälter: Überschrift "Artikel" erscheint, die Anzahl zählt nur Artikel (nicht "Darin").
+  const t2 = await open("index.html?c=schrank", {
+    seed: {
+      "containers/schrank": { name: "Schrank", type: "schrank" },
+      "containers/fach": { name: "Fach", type: "fach", parent: "schrank" },
+      "containers/schrank/items/a": { name: "Salz", qty: 1, unit: "Packung" },
+      "containers/schrank/items/b": { name: "Zucker", qty: 1, unit: "Packung" },
+      "containers/schrank/items/c": { name: "Mehl", qty: 1, unit: "Packung" },
+    },
+  });
+  await t2.page.waitForSelector('#children a.card[data-cid="fach"]');
+  await t2.page.waitForSelector("#items .card");
+  assertEqual(await t2.page.textContent("#item-count"), "3 Artikel", "Anzahl ohne Unterbehälter");
+  assertEqual(await t2.page.locator("#children h2.section-label").textContent(), "Darin", "Überschrift Darin");
+  assert(await t2.page.locator("#items-heading").isVisible(), "Überschrift 'Artikel' neben 'Darin'");
+  await t2.done();
+});
+
 let failed = 1;
 try {
   failed = await run(process.argv[2]);

@@ -484,8 +484,12 @@ function mhdBadge(mhd) {
   return `<span class="mhd mhd-${status}">${escapeHtml(text)}</span>`;
 }
 
-function withSpace(html) {
-  return html ? ` ${html}` : "";
+// MHD hinter Menge/Einheit in einer Zeile: "Packung · MHD 23.11.2026". Bald/abgelaufen stehen als
+// Etikett ohne Punkt. Das geschützte Leerzeichen hält Punkt und Datum zusammen, falls die Zeile umbricht.
+function mhdSuffix(mhd) {
+  const badge = mhdBadge(mhd);
+  if (!badge) return "";
+  return mhdStatus(mhd, new Date()) === "ok" ? ` ·&nbsp;${badge}` : ` ${badge}`;
 }
 
 function saveMhd(containerId, itemId, item, mhd) {
@@ -1276,10 +1280,12 @@ function containerCard(id, extra = "") {
 
 function renderOverview() {
   main.innerHTML = `
-    <div class="search-row">
-      <div class="search-field">${icon("search")}<input type="search" id="search" class="search-input" placeholder="Wo ist …?"
-        autocomplete="off" enterkeyhint="search" aria-label="Artikel suchen" maxlength="${MAX_NAME}" /></div>
-      ${canScan ? `<button type="button" id="scan-btn" class="scan-btn" aria-label="QR-Code scannen">${icon("scan")}Scan</button>` : ""}
+    <div class="hero">
+      <div class="search-row">
+        <div class="search-field">${icon("search")}<input type="search" id="search" class="search-input" placeholder="Wo ist …?"
+          autocomplete="off" enterkeyhint="search" aria-label="Artikel suchen" maxlength="${MAX_NAME}" /></div>
+        ${canScan ? `<button type="button" id="scan-btn" class="scan-btn" aria-label="QR-Code scannen">${icon("scan")}Scan</button>` : ""}
+      </div>
     </div>
     <div id="search-results" class="search-results" hidden></div>
     <div id="recent" class="recent-chips" hidden></div>
@@ -1369,7 +1375,7 @@ function renderOverview() {
       a.href = `index.html?c=${encodeURIComponent(it.containerId)}#i=${encodeURIComponent(it.id)}`;
       a.innerHTML = `
         <span class="thumb-btn small">${isSafePhoto(it.photo) ? `<img class="thumb" alt="" decoding="async" />` : icon("box")}</span>
-        <div class="name"><strong>${escapeHtml(it.name)}</strong><small>${escapeHtml(String(it.qty ?? 1))} ${escapeHtml(it.unit || "")} · in <b>${escapeHtml(it.containerName)}</b>${withSpace(mhdBadge(it.mhd))}</small></div>
+        <div class="name"><strong>${escapeHtml(it.name)}</strong><small>${escapeHtml(String(it.qty ?? 1))} ${escapeHtml(it.unit || "")} · in <b>${escapeHtml(it.containerName)}</b>${mhdSuffix(it.mhd)}</small></div>
         <div aria-hidden="true">›</div>`;
       const img = a.querySelector("img");
       if (img) img.src = it.photo;
@@ -1436,9 +1442,11 @@ function renderExpiring() {
   if (!EXPIRY_WINDOWS.includes(days)) days = EXPIRY_WINDOWS[0];
   document.title = "Läuft bald ab – Vorrat";
   main.innerHTML = `
-    <h1>Läuft bald ab</h1>
-    <div class="segmented" role="group" aria-label="Zeitraum">
-      ${EXPIRY_WINDOWS.map((d) => `<button type="button" data-days="${d}">≤ ${d} Tage</button>`).join("")}
+    <div class="hero">
+      <h1>Läuft bald ab</h1>
+      <div class="segmented" role="group" aria-label="Zeitraum">
+        ${EXPIRY_WINDOWS.map((d) => `<button type="button" data-days="${d}">≤ ${d} Tage</button>`).join("")}
+      </div>
     </div>
     <p class="muted" id="expiring-count"></p>
     <div class="container-list" id="expiring-list"><p class="empty-hint">Lade…</p></div>
@@ -1574,15 +1582,21 @@ function renderContainer(id) {
     return;
   }
   main.innerHTML = `
-    <nav class="breadcrumb" id="breadcrumb" aria-label="Pfad" hidden></nav>
-    <div class="title-row">
-      <h1 id="container-title">…</h1>
-      <button type="button" class="link-btn" id="select-btn" aria-label="Mehrere Artikel auswählen" title="Auswählen und verschieben">${icon("select")}</button>
-      <button type="button" class="link-btn" id="edit-btn" aria-label="Behälter bearbeiten" title="Umbenennen, Typ, liegt in, löschen">${icon("edit")}</button>
-      <a class="link-btn" id="qr-link" href="qr.html" data-qr aria-label="QR-Code für diesen Behälter">${icon("qr")}</a>
+    <div class="hero">
+      <nav class="breadcrumb" id="breadcrumb" aria-label="Pfad" hidden></nav>
+      <div class="title-row">
+        <h1 id="container-title">…</h1>
+        <button type="button" class="link-btn" id="select-btn" aria-label="Mehrere Artikel auswählen" title="Auswählen und verschieben">${icon("select")}</button>
+        <button type="button" class="link-btn" id="edit-btn" aria-label="Behälter bearbeiten" title="Umbenennen, Typ, liegt in, löschen">${icon("edit")}</button>
+        <a class="link-btn" id="qr-link" href="qr.html" data-qr aria-label="QR-Code für diesen Behälter">${icon("qr")}</a>
+      </div>
+      <div class="container-meta">
+        <small class="muted" id="container-type"></small>
+        <p class="item-count" id="item-count" hidden></p>
+      </div>
     </div>
-    <small class="muted" id="container-type"></small>
     <div id="children" class="container-list children" hidden></div>
+    <h2 class="section-label" id="items-heading" hidden>Artikel</h2>
     <div class="search-field" hidden>${icon("search")}<input type="search" id="item-filter" class="search-input"
       placeholder="In diesem Behälter filtern" autocomplete="off" aria-label="Artikel filtern" /></div>
     <div id="items"><p class="empty-hint">Lade…</p></div>
@@ -1626,10 +1640,13 @@ function renderContainer(id) {
   const breadcrumbEl = document.getElementById("breadcrumb");
   const childrenEl = document.getElementById("children");
   const typeEl = document.getElementById("container-type");
+  const countEl = document.getElementById("item-count");
+  const itemsHeading = document.getElementById("items-heading");
   const selectBar = document.getElementById("select-bar");
   let containerName = id;
   let previewUrl = null;
   let currentItems = new Map();
+  let lastSnap = null; // letzter Artikel-Snapshot (auch für die Anzahl im Kopf)
   let deleted = false;
   let selecting = false;
   const selected = new Set();
@@ -1716,8 +1733,9 @@ function renderContainer(id) {
     typeEl.innerHTML = type ? `${typeIcon(type)}<span>${escapeHtml(typeLabel(type))}</span>` : "";
     const kids = childContainers(id, allContainers);
     childrenEl.hidden = !kids.length;
-    childrenEl.innerHTML = kids.length ? `<h2>Darin</h2>` : "";
+    childrenEl.innerHTML = kids.length ? `<h2 class="section-label">Darin</h2>` : "";
     for (const k of kids) childrenEl.appendChild(containerCard(k.id));
+    updateItemCount();
   });
 
   document.getElementById("edit-btn").addEventListener("click", async () => {
@@ -1838,13 +1856,22 @@ function renderContainer(id) {
   });
 
   const itemsQuery = query(collection(db, "containers", id, "items"), orderBy("name"));
-  let lastSnap = null;
   let visibleIds = [];
   let highlightPending = decodeURIComponent((location.hash.match(/^#i=(.+)$/) || [])[1] || "");
+
+  // Anzahl im Kopf ("6 Artikel", alle Artikel des Behälters, unabhängig vom Filter; "Artikel" ist
+  // Singular und Plural). Die Überschrift "Artikel" erscheint nur, wenn es auch "Darin" gibt.
+  function updateItemCount() {
+    const n = lastSnap && !deleted ? lastSnap.size : 0;
+    countEl.hidden = !n;
+    countEl.innerHTML = n ? `<strong>${n}</strong> <span>Artikel</span>` : "";
+    itemsHeading.hidden = !n || childrenEl.hidden;
+  }
 
   function renderItems() {
     const snap = lastSnap;
     if (!snap || deleted) return;
+    updateItemCount();
     currentItems = new Map(snap.docs.map((d) => [d.id, d.data()]));
     document.getElementById("item-names").innerHTML = [...currentItems.values()]
       .map((it) => `<option value="${escapeHtml(it.name)}"></option>`).join("");
@@ -1875,7 +1902,7 @@ function renderContainer(id) {
         row.dataset.id = itemId;
         row.innerHTML = `
           <input type="checkbox" class="select-box" ${selected.has(itemId) ? "checked" : ""} />
-          <div class="name"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(String(item.qty ?? 1))} ${escapeHtml(item.unit || "")}${withSpace(mhdBadge(item.mhd))}</small></div>`;
+          <div class="name"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(String(item.qty ?? 1))} ${escapeHtml(item.unit || "")}${mhdSuffix(item.mhd)}</small></div>`;
         row.querySelector("input").addEventListener("change", (e) => {
           if (e.target.checked) selected.add(itemId); else selected.delete(itemId);
           updateSelectBar();
@@ -1894,7 +1921,7 @@ function renderContainer(id) {
           ${busy ? `<span class="spinner">${icon("hourglass")}</span>` : hasPhoto ? `<img class="thumb" alt="" decoding="async" />` : icon("camera")}
         </button>
         <button type="button" class="name name-btn" data-action="details" aria-label="Details zu ${escapeHtml(item.name)}">
-          <strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.unit || "")}${withSpace(mhdBadge(item.mhd))}</small>
+          <strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.unit || "")}${mhdSuffix(item.mhd)}</small>
         </button>
         <div class="qty-controls">
           <button type="button" class="round" data-action="dec" aria-label="${step === 1 ? "Eins weniger" : `${step} weniger`}">−</button>
