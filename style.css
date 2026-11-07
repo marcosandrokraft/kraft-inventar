@@ -1108,6 +1108,10 @@ body.read-only #edit-btn,
 body.read-only #items button.delete,
 body.read-only #items .qty-controls button.round { display: none; }
 body.read-only .qty-value { cursor: default; }
+body.read-only #items .qty-controls { box-shadow: none; }
+
+/* Erklärtext unter dem Dialogtitel (nicht der Mengen-Anker der Details) */
+.photo-dialog > p.dialog-note { margin: -0.3rem 0 0.2rem; font-size: 0.9rem; font-weight: 500; line-height: 1.45; font-variant-numeric: normal; }
 
 /* Anmeldeseite: Einstieg in den Übungsmodus */
 .try-practice { margin-top: 2rem; padding-top: 1.25rem; border-top: 1px solid var(--hairline); }

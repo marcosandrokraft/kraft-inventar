@@ -606,7 +606,7 @@ function showIconPicker({ name = "", current = null, onPick }) {
   const suggestion = suggestIcon(name);
   const { overlay, close } = openDialog(`
     <strong>Icon wählen</strong>
-    <span class="muted icon-picker-hint"></span>
+    <p class="muted dialog-note icon-picker-hint"></p>
     <div class="search-field icon-picker-search">${icon("search")}<input type="search" class="search-input" placeholder="Icon suchen (z.B. Käse)"
       autocomplete="off" aria-label="Icons durchsuchen" maxlength="40" /></div>
     <div class="icon-grid"></div>
@@ -1430,8 +1430,8 @@ function resetPractice() {
 function showHelpDialog() {
   const { overlay, close } = openDialog(`
     <strong>Hilfe</strong>
-    <span class="muted">Die Einführung zeigt dir Schritt für Schritt das Wichtigste – im Übungsmodus mit
-      Beispieldaten, dein echtes Inventar bleibt unberührt.</span>
+    <p class="muted dialog-note">Die Einführung zeigt dir Schritt für Schritt das Wichtigste – im Übungsmodus mit
+      Beispieldaten, dein echtes Inventar bleibt unberührt.</p>
     <div class="photo-actions">
       <button type="button" data-action="tutorial">${icon("help")}Einführung starten</button>
     </div>
@@ -1444,7 +1444,7 @@ function showHelpDialog() {
       <button type="button" data-action="practice" class="neutral">${icon("practice")}Übungsmodus</button>
     </div>`}
     ${!PRACTICE && lockState.owner ? `
-    <span class="muted">Nur für dich (Owner): ${lockState.locked ? "Die echten Daten sind für andere gesperrt." : "Sperren, damit andere vorübergehend nur lesen können."}</span>
+    <p class="muted dialog-note">Nur für dich (Owner): ${lockState.locked ? "Die echten Daten sind für andere gesperrt." : "Sperren, damit andere vorübergehend nur lesen können."}</p>
     <div class="photo-actions">
       <button type="button" data-action="lock" class="neutral">${icon("lock")}${lockState.locked ? "Echte Daten entsperren" : "Echte Daten sperren"}</button>
     </div>` : ""}
