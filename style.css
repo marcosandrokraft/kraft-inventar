@@ -58,6 +58,11 @@
   --soon: #8a5a00;          /* "läuft bald ab": Ocker, 5.1:1 auf --soon-soft */
   --soon-soft: #f6ecd6;
 
+  /* Übungsmodus-Balken: Messing-Tönung (ruhig, aber unverwechselbar), 11:1 */
+  --practice-bg: #f3e8d4;
+  --practice-text: #3a2809;
+  --practice-line: rgba(138, 95, 26, 0.32);
+
   --radius: 12px;
   --radius-ctrl: 10px;
   --font: "Manrope", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -99,6 +104,10 @@
     --danger-soft: rgba(255, 107, 107, 0.14);
     --soon: #f5b83d;          /* Amber, 10.6:1 */
     --soon-soft: rgba(245, 184, 61, 0.13);
+
+    --practice-bg: #2a2416;
+    --practice-text: #f1dcb4;   /* 11:1 */
+    --practice-line: rgba(233, 184, 114, 0.28);
   }
 }
 
@@ -976,3 +985,131 @@ body.selecting { padding-bottom: calc(8rem + env(safe-area-inset-bottom)); }
   .card { gap: 0.5rem; }
   .thumb-btn { width: 2.75rem; height: 2.75rem; }
 }
+
+/* ---------- Balken oben: Übungsmodus / Sperre ---------- */
+.mode-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem max(1rem, calc((100% - 560px) / 2 + 1rem));
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+.mode-bar[hidden] { display: none; }
+.mode-practice { background: var(--practice-bg); color: var(--practice-text); border-bottom: 1px solid var(--practice-line); }
+.mode-lock { background: var(--fill); color: var(--text); border-bottom: 1px solid var(--hairline); }
+.mode-text { flex: 1; min-width: 0; display: flex; gap: 0.5rem; align-items: flex-start; }
+.mode-text .icon { width: 1.1rem; height: 1.1rem; margin-top: 0.05rem; }
+.mode-lock .mode-text .icon { color: var(--accent); }
+.mode-bar button {
+  flex: 0 0 auto;
+  min-height: 2.75rem;
+  padding: 0 0.9rem;
+  border-radius: var(--radius-ctrl);
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.mode-bar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* "?" in der Kopfzeile: nur Icon, 44 px Tippfläche */
+header.app-header .help-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  padding: 0;
+}
+header.app-header .help-btn[hidden] { display: none; }
+
+/* ---------- Artikel-Icons (Lucide) in Messing auf ruhiger Fläche ---------- */
+.thumb-btn .item-icon { width: 1.6rem; height: 1.6rem; color: var(--accent); stroke-width: 1.6; }
+.thumb-btn.small .item-icon { width: 1.35rem; height: 1.35rem; }
+.detail-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 8rem;
+  border-radius: var(--radius);
+  background: var(--dialog-fill);
+  color: var(--accent);
+}
+.detail-icon .icon { width: 4rem; height: 4rem; stroke-width: 1.3; }
+.photo-actions button .item-icon { color: var(--accent); }
+
+/* Icon-Vorschlag im Formular neben der Kamera (antippen = anderes Icon wählen) */
+form.add-form .icon-pick {
+  flex: 0 0 auto;
+  width: 2.75rem;
+  height: 2.75rem;
+  min-height: 0;
+  padding: 0;
+  border-radius: var(--radius-ctrl);
+  background: var(--fill);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1.5px var(--practice-line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+form.add-form .icon-pick[hidden] { display: none; }
+form.add-form .icon-pick .icon { width: 1.5rem; height: 1.5rem; stroke-width: 1.6; }
+form.add-form .icon-pick.is-fallback { color: var(--muted); box-shadow: inset 0 0 0 1.5px var(--hairline); }
+form.add-form .icon-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+
+/* Auswahl-Raster */
+.icon-picker-hint { overflow-wrap: anywhere; }
+.photo-dialog .search-field { margin-bottom: 0; }
+.photo-dialog .search-input { background: var(--dialog-fill); box-shadow: none; }
+.icon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(4.4rem, 1fr));
+  gap: 0.4rem;
+  max-height: min(50vh, 26rem);
+  overflow-y: auto;
+  padding: 2px;
+}
+.icon-grid .empty-hint { grid-column: 1 / -1; padding: 1rem 0; }
+.icon-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  min-height: 4.4rem;
+  padding: 0.5rem 0.2rem;
+  border-radius: var(--radius-ctrl);
+  border: none;
+  background: var(--dialog-fill);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.15;
+  text-align: center;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.icon-choice .icon { width: 1.6rem; height: 1.6rem; color: var(--accent); stroke-width: 1.6; }
+.icon-choice[data-suggested] { box-shadow: inset 0 0 0 1.5px var(--practice-line); }
+.icon-choice[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--accent); }
+.icon-choice:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ---------- Sperre: Nicht-Owner sehen keine Bedienelemente zum Ändern ---------- */
+body.read-only #add-item-form,
+body.read-only .sub-form,
+body.read-only #new-container-form,
+body.read-only #select-btn,
+body.read-only #edit-btn,
+body.read-only #items button.delete,
+body.read-only #items .qty-controls button.round { display: none; }
+body.read-only .qty-value { cursor: default; }
+
+/* Anmeldeseite: Einstieg in den Übungsmodus */
+.try-practice { margin-top: 2rem; padding-top: 1.25rem; border-top: 1px solid var(--hairline); }
+.try-practice .button-link { gap: 0.5rem; width: 100%; }
+.button-link .icon { color: var(--accent); }

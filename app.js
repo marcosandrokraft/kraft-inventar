@@ -1,36 +1,4 @@
 import * as config from "./firebase-config.js";
-import { initializeApp } from "./vendor/firebase-10.14.1/firebase-app.js";
-import {
-  initializeFirestore,
-  getFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
-  collection,
-  collectionGroup,
-  doc,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  getDoc,
-  getDocs,
-  onSnapshot,
-  serverTimestamp,
-  increment,
-  deleteField,
-  writeBatch,
-  terminate,
-  clearIndexedDbPersistence,
-  query,
-  orderBy,
-} from "./vendor/firebase-10.14.1/firebase-firestore.js";
-import {
-  getAuth,
-  onAuthStateChanged,
-  sendSignInLinkToEmail,
-  isSignInWithEmailLink,
-  signInWithEmailLink,
-  signOut,
-} from "./vendor/firebase-10.14.1/firebase-auth.js";
 import {
   UNITS,
   MAX_NAME,
@@ -68,7 +36,104 @@ import {
   expiringItems,
   daysText,
   qrPageQuery,
+  practiceParam,
+  scanTarget,
+  practiceLinkAction,
 } from "./lib.js";
+import { ITEM_ICONS } from "./item-icons.js";
+import { suggestIcon, isKnownIcon, iconForItem, searchIcons, FALLBACK_ICON } from "./icon-match.js";
+
+// --- Übungsmodus ---
+// Jede Person übt für sich mit Beispieldaten (uebung-firebase.js, gespeichert in localStorage dieses
+// Geräts). Dann wird Firebase gar nicht geladen: nichts geht an die echte Datenbank, und deren
+// Offline-Speicher (IndexedDB) bleibt unberührt. Ein-/Ausschalten über ?uebung=1 / ?uebung=0, der
+// Schalter gilt für diesen Tab (sessionStorage) – beim nächsten Öffnen der App sind wieder die echten
+// Daten da, die Übungsdaten bleiben für das nächste Mal erhalten.
+const PRACTICE_KEY = "vorrat-uebung-aktiv";
+function detectPractice() {
+  const p = practiceParam(location.search);
+  try {
+    if (p === true) sessionStorage.setItem(PRACTICE_KEY, "1");
+    if (p === false) sessionStorage.removeItem(PRACTICE_KEY);
+    return p ?? sessionStorage.getItem(PRACTICE_KEY) === "1";
+  } catch {
+    return p === true;
+  }
+}
+const PRACTICE = detectPractice();
+
+// Firebase bzw. die Übungs-Datenschicht (gleiche Funktionen) laden.
+const [appMod, firestoreMod, authMod] = PRACTICE
+  ? await import("./uebung-firebase.js").then((m) => [m, m, m])
+  : await Promise.all([
+    import("./vendor/firebase-10.14.1/firebase-app.js"),
+    import("./vendor/firebase-10.14.1/firebase-firestore.js"),
+    import("./vendor/firebase-10.14.1/firebase-auth.js"),
+  ]);
+const { initializeApp } = appMod;
+const {
+  initializeFirestore,
+  getFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  collection,
+  collectionGroup,
+  doc,
+  getDoc,
+  getDocs,
+  onSnapshot,
+  serverTimestamp,
+  increment,
+  deleteField,
+  terminate,
+  clearIndexedDbPersistence,
+  query,
+  orderBy,
+} = firestoreMod;
+const {
+  getAuth,
+  onAuthStateChanged,
+  sendSignInLinkToEmail,
+  isSignInWithEmailLink,
+  signInWithEmailLink,
+  signOut,
+} = authMod;
+
+// --- Sperre (Owner) ---
+// settings/lock { locked, lockedBy } – bei Sperre dürfen nur Owner (members/<adresse>.role == "owner")
+// schreiben, das prüfen die Regeln. Die App zeigt das vorher an und schreibt dann gar nicht erst.
+const lockState = { locked: false, lockedBy: "", owner: false, name: "" };
+function readOnly() {
+  return !PRACTICE && lockState.locked && !lockState.owner;
+}
+const LOCKED_TEXT = "Vorübergehend gesperrt – nur Lesen";
+function lockedError() {
+  const err = new Error(LOCKED_TEXT);
+  err.code = "locked";
+  return err;
+}
+// Vor jeder Änderung: gesperrt → freundliche Meldung statt "permission-denied".
+function blockedByLock() {
+  if (!readOnly()) return false;
+  toast(`${LOCKED_TEXT}. Zum Üben: Übungsmodus (Hilfe oben).`, 4000);
+  return true;
+}
+// Schreibfunktionen: bei Sperre gar nicht erst schreiben (Sicherheitsnetz, falls ein Knopf übersehen wurde).
+const guard = (fn) => (...args) => (readOnly() ? Promise.reject(lockedError()) : fn(...args));
+const setDoc = guard(firestoreMod.setDoc);
+const updateDoc = guard(firestoreMod.updateDoc);
+const deleteDoc = guard(firestoreMod.deleteDoc);
+function writeBatch(database) {
+  const batch = firestoreMod.writeBatch(database);
+  const commit = batch.commit.bind(batch);
+  batch.commit = () => (readOnly() ? Promise.reject(lockedError()) : commit());
+  return batch;
+}
+
+// Ereignisse für das Tutorial (tutorial.js hört auf "vorrat:action").
+function emit(type, detail = {}) {
+  document.dispatchEvent(new CustomEvent("vorrat:action", { detail: { type, ...detail } }));
+}
 
 // Freistellungs-Bibliothek wird erst beim ersten Foto geladen. Als statischer Import würde ein
 // Ladefehler (CDN nicht erreichbar, alter Browser) die ganze App bei "Lade…" stehen lassen.
@@ -86,7 +151,7 @@ const app = initializeApp(config.firebaseConfig);
 
 // Optional: App Check (reCAPTCHA v3) – lässt nur Anfragen von dieser Webseite zu.
 // Aktiv, sobald in firebase-config.js `appCheckSiteKey` eingetragen ist.
-if (config.appCheckSiteKey) {
+if (config.appCheckSiteKey && !PRACTICE) {
   try {
     const { initializeAppCheck, ReCaptchaV3Provider } = await import(
       "./vendor/firebase-10.14.1/firebase-app-check.js"
@@ -184,8 +249,14 @@ function confirmFirst(btn, fn, label = "Löschen?") {
 // vom Server kommt (ohne Netz) evtl. erst viel später. Fehler (z.B. Regeln) werden trotzdem gemeldet.
 function background(promise, what = "Speichern") {
   promise.catch((err) => {
+    if (err.code === "locked" || (err.code === "permission-denied" && lockState.locked)) {
+      toast(`${LOCKED_TEXT} – nichts geändert.`, 4000);
+      return;
+    }
     console.error(err);
-    toast(`${what} fehlgeschlagen (${err.code || err.message})`, 4000);
+    // Übungsspeicher voll: verständliche Meldung der Übungs-Datenschicht zeigen.
+    const reason = err.code === "resource-exhausted" ? err.message : (err.code || err.message);
+    toast(`${what} fehlgeschlagen (${reason})`, 4000);
   });
 }
 
@@ -342,6 +413,7 @@ photoInput.addEventListener("change", () => {
 });
 
 function openPhotoPicker(containerId, itemId) {
+  if (blockedByLock()) return;
   pendingPhotoTarget = { containerId, itemId };
   photoInput.click();
 }
@@ -352,8 +424,10 @@ function openDialog(html) {
   overlay.className = "photo-overlay";
   overlay.innerHTML = `<div class="photo-dialog" role="dialog" aria-modal="true">${html}</div>`;
   const close = () => {
+    if (!overlay.isConnected) return;
     overlay.remove();
     document.removeEventListener("keydown", onKey);
+    emit("dialog-close");
   };
   // Escape schliesst nur das oberste Fenster (z.B. Scanner über dem Verschieben-Dialog).
   const onKey = (e) => {
@@ -363,6 +437,7 @@ function openDialog(html) {
   overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
   overlay.querySelectorAll('[data-action="close"]').forEach((b) => b.addEventListener("click", close));
   document.body.appendChild(overlay);
+  emit("dialog-open");
   return { overlay, close };
 }
 
@@ -423,7 +498,8 @@ function setQrHref(a) {
   if (sel && !containers.has(sel)) {
     containers = new Map(allContainers).set(sel, { name: a.dataset.qrName || sel });
   }
-  a.href = `qr.html?${qrPageQuery(containers, sel ? [sel] : [])}`;
+  // Übungsmodus: Druckseite erzeugt Übungs-Codes (?uebung=1 im Link jedes Codes).
+  a.href = `qr.html?${PRACTICE ? "uebung=1&" : ""}${qrPageQuery(containers, sel ? [sel] : [])}`;
 }
 document.addEventListener("click", (e) => {
   const a = e.target.closest?.("a[data-qr]");
@@ -462,6 +538,9 @@ const ICON_PATHS = {
   print: '<path d="M7 9V3.5h10V9"/><rect x="3.5" y="9" width="17" height="8" rx="2"/><path d="M7 14h10v6.5H7z"/>',
   hourglass: '<path d="M6.5 3.5h11M6.5 20.5h11"/><path d="M8 3.5c0 4 4 5.5 4 8.5s-4 4.5-4 8.5M16 3.5c0 4-4 5.5-4 8.5s4 4.5 4 8.5"/>',
   box: TYPE_ICON_PATHS.box,
+  lock: '<rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
+  help: '<circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.6a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2-2.4 3.6"/><path d="M12 17.2v.01"/>',
+  practice: '<path d="m2.5 9 9.5-4.5L21.5 9 12 13.5z"/><path d="M6.5 11.2v4.3c1.6 1.4 3.5 2 5.5 2s3.9-.6 5.5-2v-4.3M21.5 9v5"/>',
 };
 function svgIcon(paths, cls) {
   return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${paths}</svg>`;
@@ -469,6 +548,17 @@ function svgIcon(paths, cls) {
 // icon("trash") → SVG-Markup; nur feste Namen aus ICON_PATHS.
 function icon(name) {
   return svgIcon(ICON_PATHS[name], "icon");
+}
+// Artikel-Icon (Lucide, item-icons.js) – nur bekannte IDs, Pfade sind feste Daten aus dem Repo.
+function itemIconSvg(id, cls = "icon item-icon") {
+  return isKnownIcon(id) ? svgIcon(ITEM_ICONS[id].paths, cls) : "";
+}
+// Inhalt des Vorschaubilds: Foto > gespeichertes Icon > Vorschlag aus dem Namen > `fallback`.
+// Ein <img> bekommt sein src danach per JS (nie Nutzerdaten im Markup).
+function thumbContent(item, fallback = icon("camera")) {
+  if (isSafePhoto(item.photo)) return `<img class="thumb" alt="" decoding="async" />`;
+  const id = iconForItem(item);
+  return id ? itemIconSvg(id) : fallback;
 }
 function typeIcon(type) {
   const paths = TYPE_ICON_PATHS[type];
@@ -493,10 +583,62 @@ function mhdSuffix(mhd) {
 }
 
 function saveMhd(containerId, itemId, item, mhd) {
+  if (blockedByLock()) return;
   const data = { mhd: mhd ? mhd : deleteField(), updatedAt: serverTimestamp() };
   background(updateDoc(itemRef(containerId, itemId), data), "MHD speichern");
   item.mhd = mhd || undefined;
   toast(mhd ? `"${item.name}": MHD ${formatDate(mhd)}` : `"${item.name}": MHD entfernt`);
+  emit("mhd-saved", { containerId, itemId });
+}
+
+// Icon speichern (null = entfernen → wieder Vorschlag aus dem Namen).
+function saveIcon(containerId, itemId, item, iconId) {
+  if (blockedByLock()) return;
+  const data = { icon: iconId && isKnownIcon(iconId) ? iconId : deleteField(), updatedAt: serverTimestamp() };
+  background(updateDoc(itemRef(containerId, itemId), data), "Icon speichern");
+  item.icon = iconId || undefined;
+  toast(iconId ? `"${item.name}": Icon „${ITEM_ICONS[iconId].label}“` : `"${item.name}": Icon automatisch`);
+  emit("icon-chosen", { containerId, itemId });
+}
+
+// Auswahl-Raster für Icons mit Suche. `onPick(id)`; id = null heisst "automatisch (aus dem Namen)".
+function showIconPicker({ name = "", current = null, onPick }) {
+  const suggestion = suggestIcon(name);
+  const { overlay, close } = openDialog(`
+    <strong>Icon wählen</strong>
+    <span class="muted icon-picker-hint"></span>
+    <div class="search-field icon-picker-search">${icon("search")}<input type="search" class="search-input" placeholder="Icon suchen (z.B. Käse)"
+      autocomplete="off" aria-label="Icons durchsuchen" maxlength="40" /></div>
+    <div class="icon-grid"></div>
+    <div class="photo-actions">
+      <button type="button" data-action="auto" class="secondary">Automatisch</button>
+      <button type="button" data-action="close" class="secondary">Abbrechen</button>
+    </div>
+  `);
+  overlay.querySelector(".icon-picker-hint").textContent = suggestion
+    ? `Vorschlag für „${name}“: ${ITEM_ICONS[suggestion].label}`
+    : name ? `Kein Vorschlag für „${name}“ – bitte wählen.` : "Bitte ein Icon wählen.";
+  const grid = overlay.querySelector(".icon-grid");
+  const input = overlay.querySelector("input");
+  function render() {
+    let ids = searchIcons(input.value);
+    if (!input.value.trim() && suggestion) ids = [suggestion, ...ids.filter((x) => x !== suggestion)];
+    grid.innerHTML = ids.length
+      ? ids.map((id) => `<button type="button" class="icon-choice" data-icon="${id}" aria-pressed="${id === current}"${id === suggestion ? ' data-suggested="1"' : ""}>${itemIconSvg(id)}<span>${escapeHtml(ITEM_ICONS[id].label)}</span></button>`).join("")
+      : `<p class="empty-hint">Kein Icon gefunden.</p>`;
+  }
+  render();
+  input.addEventListener("input", render);
+  grid.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-icon]");
+    if (!b) return;
+    close();
+    onPick(b.dataset.icon);
+  });
+  overlay.querySelector('[data-action="auto"]').addEventListener("click", () => {
+    close();
+    onPick(null);
+  });
 }
 
 // Auswahl des MHD: Schnellwahl, Kalender, entfernen, (Experiment) mit Kamera lesen.
@@ -641,28 +783,43 @@ function showMhdSuggestions(containerId, itemId, item, dates, source, rawText) {
 // Detailansicht eines Artikels: Foto gross, Foto ändern, MHD, Verschieben, Entfernen.
 function showItemDetails(containerId, itemId, item) {
   const hasPhoto = isSafePhoto(item.photo);
+  const iconId = iconForItem(item);
+  const ro = readOnly();
   const { overlay, close } = openDialog(`
-    ${hasPhoto ? `<img alt="" />` : ""}
+    ${hasPhoto ? `<img alt="" />` : iconId ? `<div class="detail-icon">${itemIconSvg(iconId)}</div>` : ""}
     <strong></strong>
     <span class="muted">${escapeHtml(String(item.qty ?? 1))} ${escapeHtml(item.unit || "")}</span>
     <span class="muted">${isValidIsoDate(item.mhd) ? mhdBadge(item.mhd) : "MHD: –"}</span>
+    ${ro ? `<span class="muted">${escapeHtml(LOCKED_TEXT)}.</span>` : `
     <div class="photo-actions">
-      <button type="button" data-action="change">${icon("camera")}${hasPhoto ? "Foto ändern" : "Foto hinzufügen"}</button>
+      <button type="button" data-action="change">${icon("camera")}${hasPhoto ? "Foto ändern" : "Foto"}</button>
+      <button type="button" data-action="icon" class="neutral">${itemIconSvg(iconId || FALLBACK_ICON)}Icon wählen</button>
+    </div>
+    <div class="photo-actions">
       <button type="button" data-action="mhd" class="neutral">${icon("calendar")}MHD</button>
+      <button type="button" data-action="move" class="neutral">${icon("move")}Verschieben</button>
     </div>
     <div class="photo-actions">
-      <button type="button" data-action="move" class="neutral">${icon("move")}Verschieben</button>
       <button type="button" data-action="del" class="danger">${icon("trash")}Entfernen</button>
-    </div>
+    </div>`}
     <div class="photo-actions">
       <button type="button" data-action="close" class="secondary">Schliessen</button>
     </div>
   `);
   if (hasPhoto) overlay.querySelector("img").src = item.photo;
   overlay.querySelector("strong").textContent = item.name;
+  if (ro) return;
   overlay.querySelector('[data-action="change"]').addEventListener("click", () => {
     close();
     openPhotoPicker(containerId, itemId);
+  });
+  overlay.querySelector('[data-action="icon"]').addEventListener("click", () => {
+    close();
+    showIconPicker({
+      name: item.name,
+      current: isKnownIcon(item.icon) ? item.icon : null,
+      onPick: (id) => saveIcon(containerId, itemId, item, id),
+    });
   });
   overlay.querySelector('[data-action="mhd"]').addEventListener("click", () => {
     close();
@@ -738,7 +895,9 @@ function setupMoveScan(overlay, fromId, targets) {
     openScanner({
       hint: "QR-Code des Ziel-Behälters ins Bild halten",
       onCode: (raw) => {
-        const r = moveTargetFromScan(raw, location.href, fromId, allContainers);
+        // Übungs-Codes nur im Übungsmodus, echte nur ausserhalb.
+        const t = scanTarget(raw, location.href);
+        const r = t && t.practice === PRACTICE ? moveTargetFromScan(raw, location.href, fromId, allContainers) : { error: "invalid" };
         if (r.error === "invalid") {
           if (!warned) { warned = true; toast("Das ist kein QR-Code dieser App"); }
           return false;
@@ -770,6 +929,7 @@ function itemBackup(item) {
   };
   if (isSafePhoto(item.photo)) data.photo = item.photo;
   if (isValidIsoDate(item.mhd)) data.mhd = item.mhd;
+  if (isKnownIcon(item.icon)) data.icon = item.icon;
   return data;
 }
 
@@ -777,6 +937,7 @@ function itemBackup(item) {
 // addieren, hier löschen). Artikel mit gleicher ID, aber anderer Einheit im Ziel werden übersprungen.
 // Mit "Rückgängig" (ebenfalls ein Batch).
 async function moveItems(fromId, entries, target) {
+  if (blockedByLock()) return;
   try {
     const plans = await Promise.all(entries.map(async ({ itemId, item }) => {
       const targetItemId = isValidId(itemId) ? itemId : slugify(item.name);
@@ -813,6 +974,7 @@ async function moveItems(fromId, entries, target) {
         const back = { qty: increment(-delta), updatedAt: serverTimestamp() };
         if (!isSafePhoto(t.photo) && isSafePhoto(p.item.photo)) { upd.photo = p.item.photo; back.photo = deleteField(); }
         if (!isValidIsoDate(t.mhd) && isValidIsoDate(p.item.mhd)) { upd.mhd = p.item.mhd; back.mhd = deleteField(); }
+        if (!isKnownIcon(t.icon) && isKnownIcon(p.item.icon)) { upd.icon = p.item.icon; back.icon = deleteField(); }
         batch.update(p.dst, upd);
         undoTarget.push((b) => b.update(p.dst, back));
       } else {
@@ -835,7 +997,7 @@ async function moveItems(fromId, entries, target) {
       alert(`Nicht verschoben nach "${target.name}" (andere Einheit o.ä.): ${skipped.join(", ")}. Bitte dort zuerst anpassen.`);
     }
     if (!moved) return;
-    background(batch.commit(), "Verschieben");
+    background(batch.commit().then(() => emit("move-done", { containerId: target.id })), "Verschieben");
     const label = moved === 1 ? `"${movedPlans[0].item.name}"` : `${moved} Artikel`;
     const hash = moved === 1 ? `#i=${encodeURIComponent(movedPlans[0].targetItemId)}` : "";
     toast(`${label} → ${target.name}`, {
@@ -1001,6 +1163,7 @@ async function openScanner({ hint = "QR-Code eines Behälters ins Bild halten", 
   }).observe(document.body, { childList: true });
 
   let warned = false;
+  let warnedReal = false;
   const tick = async () => {
     if (!active) return;
     try {
@@ -1014,13 +1177,22 @@ async function openScanner({ hint = "QR-Code eines Behälters ins Bild halten", 
             }
             continue;
           }
-          const id = containerIdFromScan(raw, location.href);
-          if (id) {
+          const target = scanTarget(raw, location.href);
+          if (target && PRACTICE && !target.practice) {
+            // Echter Code im Übungsmodus: nichts öffnen, nichts anlegen.
+            if (!warnedReal) {
+              warnedReal = true;
+              toast("Das ist ein echter Behälter-Code. Im Übungsmodus öffnen sich nur Übungs-Codes – zum Öffnen die Übung beenden.", 5000);
+            }
+            continue;
+          }
+          if (target) {
             stop();
             close();
             const name = new URL(raw).searchParams.get("n");
-            try { sessionStorage.setItem(SCANNED_KEY, id); } catch {}
-            location.href = containerUrl(location.href, id, name);
+            try { sessionStorage.setItem(SCANNED_KEY, target.id); } catch {}
+            // Übungs-Code ausserhalb der Übung → öffnet ihn im Übungsmodus.
+            location.href = containerUrl(location.href, target.id, name, { practice: target.practice });
             return;
           }
           if (!warned) { warned = true; toast("Das ist kein QR-Code dieser App"); }
@@ -1039,14 +1211,20 @@ async function openScanner({ hint = "QR-Code eines Behälters ins Bild halten", 
 const EMAIL_KEY = "emailForSignIn";
 let loginError = null;
 
+// Im Übungsmodus eigene Schlüssel ("uebung:…"), damit "Zuletzt", gelöschte Behälter und die
+// QR-Liste der Übung nie mit den echten vermischt werden.
+function storageKey(key) {
+  return PRACTICE ? `uebung:${key}` : key;
+}
+
 function storageGet(key) {
-  try { return localStorage.getItem(key); } catch { return null; }
+  try { return localStorage.getItem(storageKey(key)); } catch { return null; }
 }
 
 function storageSet(key, value) {
   try {
-    if (value === null) localStorage.removeItem(key);
-    else localStorage.setItem(key, value);
+    if (value === null) localStorage.removeItem(storageKey(key));
+    else localStorage.setItem(storageKey(key), value);
   } catch {}
 }
 
@@ -1092,7 +1270,13 @@ function renderLogin() {
       <button type="submit">Link senden</button>
     </form>
     <p class="muted" id="login-status">${loginError ? escapeHtml(loginError) : ""}</p>
+    <div class="try-practice">
+      <p class="muted">Noch nicht freigeschaltet oder erst einmal ausprobieren? Im Übungsmodus übst du mit
+        Beispieldaten – nur auf diesem Gerät, ohne Anmeldung.</p>
+      <a class="button-link" href="index.html?uebung=1" id="try-practice">${icon("practice")}Ohne Anmeldung ausprobieren</a>
+    </div>
   `;
+  loadTutorial().then((m) => m.showFirstRunHint(tutorialCtx("login"))).catch(() => {});
   const status = document.getElementById("login-status");
   document.getElementById("login-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -1128,6 +1312,166 @@ function showLogout(user) {
     }
     location.reload();
   });
+}
+
+// --- Balken oben: Übungsmodus bzw. Sperre ---
+
+function updateModeBar() {
+  const bar = document.getElementById("mode-bar");
+  document.body.classList.toggle("read-only", readOnly());
+  document.body.classList.toggle("practice", PRACTICE);
+  if (!bar) return;
+  let html = "";
+  if (PRACTICE) {
+    html = `<span class="mode-text">${icon("practice")}<span><b>Übungsmodus</b> – Beispieldaten nur auf diesem Gerät. Dein echtes Inventar bleibt unberührt.</span></span>
+      <button type="button" data-mode="end">Beenden</button>`;
+  } else if (lockState.locked && lockState.owner) {
+    html = `<span class="mode-text">${icon("lock")}<span><b>Gesperrt für andere</b> – nur du kannst ändern.</span></span>
+      <button type="button" data-mode="unlock">Entsperren</button>`;
+  } else if (lockState.locked) {
+    const by = lockState.lockedBy ? ` (von ${escapeHtml(lockState.lockedBy)})` : "";
+    html = `<span class="mode-text">${icon("lock")}<span><b>Vorübergehend gesperrt</b>${by} – nur Lesen.</span></span>
+      <button type="button" data-mode="practice">Zum Üben</button>`;
+  }
+  bar.hidden = !html;
+  bar.className = `mode-bar${PRACTICE ? " mode-practice" : " mode-lock"}`;
+  bar.innerHTML = html;
+  bar.querySelector('[data-mode="end"]')?.addEventListener("click", endPractice);
+  bar.querySelector('[data-mode="unlock"]')?.addEventListener("click", toggleLock);
+  bar.querySelector('[data-mode="practice"]')?.addEventListener("click", () => { location.href = "index.html?uebung=1"; });
+}
+
+// Owner: Sperre setzen/aufheben (mit Bestätigung). Schreibt direkt (nicht über guard – Owner ist nie readOnly).
+function toggleLock() {
+  if (PRACTICE || !lockState.owner) return;
+  const lock = !lockState.locked;
+  const ok = confirm(lock
+    ? "Echte Daten für alle anderen sperren?\nSie können dann nur noch lesen, bis du wieder entsperrst. Üben geht weiterhin im Übungsmodus."
+    : "Echte Daten wieder für alle freigeben?");
+  if (!ok) return;
+  background(firestoreMod.setDoc(doc(db, "settings", "lock"), {
+    locked: lock,
+    lockedAt: serverTimestamp(),
+    lockedBy: lockState.name || "Owner",
+  }), lock ? "Sperren" : "Entsperren");
+  toast(lock ? "Gesperrt – andere können nur noch lesen" : "Entsperrt – alle können wieder ändern", 3000);
+}
+
+// Rolle (eigenes members-Dokument) und Sperre (settings/lock) beobachten. Mit älteren Regeln sind
+// beide nicht lesbar → kein Owner, nicht gesperrt (wie bisher).
+async function watchLock(user) {
+  const email = (user.email || "").toLowerCase();
+  if (email) {
+    try {
+      const m = await getDoc(doc(db, "members", email));
+      const d = m.exists() ? m.data() : {};
+      lockState.owner = d.role === "owner";
+      lockState.name = typeof d.name === "string" ? d.name.trim().slice(0, 100) : "";
+    } catch {
+      lockState.owner = false;
+    }
+  }
+  onSnapshot(doc(db, "settings", "lock"), (snap) => {
+    const d = snap.exists() ? snap.data() : {};
+    lockState.locked = d.locked === true;
+    lockState.lockedBy = typeof d.lockedBy === "string" ? d.lockedBy.slice(0, 100) : "";
+    updateModeBar(); // Bedienelemente blendet CSS aus (body.read-only), kein Neuaufbau der Liste nötig
+  }, () => {});
+}
+
+// --- Hilfe: Einführung, Übungsmodus, Sperre (Owner) ---
+
+let tutorialPromise = null;
+function loadTutorial() {
+  tutorialPromise ||= import("./tutorial.js");
+  return tutorialPromise;
+}
+
+function currentView() {
+  if (containerId) return "container";
+  if (listView(listName)) return `list-${listName}`;
+  return "overview";
+}
+
+function tutorialCtx(view = currentView()) {
+  return {
+    view,
+    containerId: view === "container" ? containerId : null,
+    practice: PRACTICE,
+    navigate: (url) => { location.href = url; },
+    startPracticeTutorial,
+    endPractice,
+  };
+}
+
+function startPracticeTutorial() {
+  location.href = "index.html?uebung=1&tutorial=1";
+}
+
+function endPractice() {
+  loadTutorial().then((m) => m.stopTutorial()).catch(() => {}).finally(() => {
+    try { sessionStorage.removeItem(PRACTICE_KEY); } catch {}
+    location.href = "index.html?uebung=0";
+  });
+}
+
+// Übungsdaten auf die Beispieldaten zurücksetzen (inkl. "Zuletzt" usw. der Übung).
+function resetPractice() {
+  if (!PRACTICE) return;
+  firestoreMod.resetPracticeData();
+  try {
+    for (const k of Object.keys(localStorage)) if (k.startsWith("uebung:")) localStorage.removeItem(k);
+  } catch {}
+  loadTutorial().then((m) => m.stopTutorial()).catch(() => {}).finally(() => {
+    location.href = "index.html";
+  });
+}
+
+function showHelpDialog() {
+  const { overlay, close } = openDialog(`
+    <strong>Hilfe</strong>
+    <span class="muted">Die Einführung zeigt dir Schritt für Schritt das Wichtigste – im Übungsmodus mit
+      Beispieldaten, dein echtes Inventar bleibt unberührt.</span>
+    <div class="photo-actions">
+      <button type="button" data-action="tutorial">${icon("help")}Einführung starten</button>
+    </div>
+    ${PRACTICE ? `
+    <div class="photo-actions">
+      <button type="button" data-action="reset" class="neutral">Übung zurücksetzen</button>
+      <button type="button" data-action="end" class="neutral">Übung beenden</button>
+    </div>` : `
+    <div class="photo-actions">
+      <button type="button" data-action="practice" class="neutral">${icon("practice")}Übungsmodus</button>
+    </div>`}
+    ${!PRACTICE && lockState.owner ? `
+    <span class="muted">Nur für dich (Owner): ${lockState.locked ? "Die echten Daten sind für andere gesperrt." : "Sperren, damit andere vorübergehend nur lesen können."}</span>
+    <div class="photo-actions">
+      <button type="button" data-action="lock" class="neutral">${icon("lock")}${lockState.locked ? "Echte Daten entsperren" : "Echte Daten sperren"}</button>
+    </div>` : ""}
+    <div class="photo-actions">
+      <button type="button" data-action="close" class="secondary">Schliessen</button>
+    </div>
+  `);
+  overlay.querySelector('[data-action="tutorial"]').addEventListener("click", () => {
+    close();
+    if (!PRACTICE) {
+      startPracticeTutorial();
+      return;
+    }
+    loadTutorial().then((m) => m.startTutorial(tutorialCtx())).catch((err) => toast(`Einführung nicht verfügbar (${err.message})`, 4000));
+  });
+  overlay.querySelector('[data-action="practice"]')?.addEventListener("click", () => { location.href = "index.html?uebung=1"; });
+  overlay.querySelector('[data-action="end"]')?.addEventListener("click", () => { close(); endPractice(); });
+  const resetBtn = overlay.querySelector('[data-action="reset"]');
+  resetBtn?.addEventListener("click", confirmFirst(resetBtn, () => { close(); resetPractice(); }, "Wirklich zurücksetzen?"));
+  overlay.querySelector('[data-action="lock"]')?.addEventListener("click", () => { close(); toggleLock(); });
+}
+
+function setupHelp() {
+  const btn = document.getElementById("help-btn");
+  if (!btn) return;
+  btn.hidden = false;
+  btn.addEventListener("click", showHelpDialog);
 }
 
 // Hinweis, wenn kein Netz da ist (Änderungen werden dann später übertragen).
@@ -1234,8 +1578,10 @@ const containerId = params.get("c");
 // ?liste=einkauf für die Einkaufsliste Küche/Kühlschrank) – siehe listView().
 const listName = containerId ? null : params.get("liste");
 
-await completeEmailLinkSignIn();
+if (!PRACTICE) await completeEmailLinkSignIn();
 watchOnline();
+setupHelp();
+updateModeBar();
 
 let started = false;
 onAuthStateChanged(auth, (user) => {
@@ -1246,17 +1592,40 @@ onAuthStateChanged(auth, (user) => {
   }
   if (started) return;
   started = true;
-  showLogout(user);
+  if (!PRACTICE) {
+    showLogout(user);
+    watchLock(user);
+  }
   setupBottomNav();
   watchContainers();
+  let view = currentView();
   if (containerId) {
-    renderContainer(containerId);
+    if (!renderContainer(containerId)) view = "other";
   } else if (listView(listName)) {
     listView(listName)();
   } else {
     renderOverview();
   }
+  afterStart(view);
 });
+
+// Übungsmodus: Einführung fortsetzen bzw. (?tutorial=1) starten. Sonst auf der Übersicht einmalig
+// den Hinweis auf die Einführung zeigen.
+function afterStart(view) {
+  if (PRACTICE) {
+    const start = params.get("tutorial") === "1";
+    if (start) {
+      const url = new URL(location.href);
+      url.searchParams.delete("tutorial");
+      history.replaceState(null, "", url.href);
+    }
+    loadTutorial()
+      .then((m) => (start ? m.startTutorial(tutorialCtx(view)) : m.resumeTutorial(tutorialCtx(view))))
+      .catch((err) => console.error("Einführung nicht geladen:", err));
+  } else if (view === "overview") {
+    loadTutorial().then((m) => m.showFirstRunHint(tutorialCtx(view))).catch(() => {});
+  }
+}
 
 function typeOptions(selected = "") {
   return `<option value="">Typ –</option>` + Object.entries(CONTAINER_TYPES)
@@ -1374,13 +1743,14 @@ function renderOverview() {
       a.className = "card result";
       a.href = `index.html?c=${encodeURIComponent(it.containerId)}#i=${encodeURIComponent(it.id)}`;
       a.innerHTML = `
-        <span class="thumb-btn small">${isSafePhoto(it.photo) ? `<img class="thumb" alt="" decoding="async" />` : icon("box")}</span>
+        <span class="thumb-btn small">${thumbContent(it, icon("box"))}</span>
         <div class="name"><strong>${escapeHtml(it.name)}</strong><small>${escapeHtml(String(it.qty ?? 1))} ${escapeHtml(it.unit || "")} · in <b>${escapeHtml(it.containerName)}</b>${mhdSuffix(it.mhd)}</small></div>
         <div aria-hidden="true">›</div>`;
       const img = a.querySelector("img");
       if (img) img.src = it.photo;
       results.appendChild(a);
     }
+    emit("search", { query: q });
   }
 
   searchInput.addEventListener("input", () => {
@@ -1401,6 +1771,7 @@ function renderOverview() {
 
   document.getElementById("new-container-form").addEventListener("submit", (e) => {
     e.preventDefault();
+    if (blockedByLock()) return;
     const name = e.target.name.value.trim().slice(0, MAX_NAME);
     const type = CONTAINER_TYPES[e.target.type.value] ? e.target.type.value : "";
     if (!name) return;
@@ -1478,7 +1849,7 @@ function renderExpiring() {
       a.dataset.cid = it.containerId;
       a.href = `index.html?c=${encodeURIComponent(it.containerId)}#i=${encodeURIComponent(it.id)}`;
       a.innerHTML = `
-        <span class="thumb-btn small">${isSafePhoto(it.photo) ? `<img class="thumb" alt="" decoding="async" />` : icon("box")}</span>
+        <span class="thumb-btn small">${thumbContent(it, icon("box"))}</span>
         <div class="name"><strong>${escapeHtml(it.name)}</strong>
           <small><span class="mhd mhd-${status}">${escapeHtml(when)} · ${escapeHtml(formatDate(it.mhd))}</span></small>
           <small>${escapeHtml(String(it.qty ?? 1))} ${escapeHtml(it.unit || "")} · in <b>${escapeHtml(pathLabel(it.containerId))}</b></small></div>
@@ -1575,11 +1946,48 @@ function showContainerSettings(id, onDeleted) {
 
 // --- Behälter-Ansicht ---
 
+// Kam dieser Aufruf von einer Seite der App (Link, Zurück, Tutorial) statt von aussen (QR-Code mit
+// der Kamera-App, Lesezeichen)?
+function cameFromApp() {
+  try {
+    return !!document.referrer && new URL(document.referrer).origin === location.origin;
+  } catch {
+    return false;
+  }
+}
+
+// Übungsmodus, aber ein echter Behälter-Code von aussen: nichts öffnen, nichts anlegen – Hinweis.
+function renderRealCodeHint(id) {
+  const n = (params.get("n") || "").trim().slice(0, MAX_NAME);
+  main.innerHTML = `
+    <p class="empty-hint">Das ist der QR-Code eines echten Behälters („<span id="real-name"></span>“).<br>
+      Du bist gerade im Übungsmodus – hier öffnen sich nur Übungs-Codes.</p>
+    <div class="photo-actions">
+      <a class="button-link" id="open-real" href="#">Übung beenden und öffnen</a>
+      <a class="button-link" href="index.html">Weiter üben</a>
+    </div>`;
+  document.getElementById("real-name").textContent = n || id;
+  document.title = "Übungsmodus – Vorrat";
+  document.getElementById("open-real").addEventListener("click", (e) => {
+    e.preventDefault();
+    try {
+      sessionStorage.removeItem(PRACTICE_KEY);
+      sessionStorage.setItem(SCANNED_KEY, id); // wie ein Scan: darf den Behälter anlegen
+    } catch {}
+    location.href = `index.html?uebung=0&c=${encodeURIComponent(id)}${n ? `&n=${encodeURIComponent(n)}` : ""}`;
+  });
+}
+
+// → false, wenn statt des Behälters ein Hinweis gezeigt wird.
 function renderContainer(id) {
   // Ein "/" in ?c= würde einen ungültigen Firestore-Pfad ergeben (Seite bliebe bei "Lade…").
   if (!id || id.includes("/")) {
     main.innerHTML = `<p class="empty-hint">Ungültiger Behälter-Link.<br><a href="index.html">Zur Übersicht</a></p>`;
-    return;
+    return false;
+  }
+  if (PRACTICE && practiceLinkAction({ hasPracticeParam: practiceParam(location.search) === true, internal: cameFromApp() }) === "real") {
+    renderRealCodeHint(id);
+    return false;
   }
   main.innerHTML = `
     <div class="hero">
@@ -1611,6 +2019,7 @@ function renderContainer(id) {
         <input name="photo" type="file" accept="image/*" aria-label="Foto aufnehmen oder hochladen" hidden />
         <span class="photo-pick-preview">${icon("camera")}</span>
       </label>
+      <button type="button" class="icon-pick" aria-label="Icon wählen" title="Vorgeschlagenes Icon – antippen zum Ändern" hidden></button>
       <input name="name" placeholder="Artikel (z.B. Milch)" list="item-names" maxlength="${MAX_NAME}"
         autocomplete="off" enterkeyhint="done" required />
       <datalist id="item-names"></datalist>
@@ -1637,6 +2046,8 @@ function renderContainer(id) {
   const form = document.getElementById("add-item-form");
   const addHint = document.getElementById("add-hint");
   const photoPreview = form.querySelector(".photo-pick-preview");
+  const iconPick = form.querySelector(".icon-pick");
+  let chosenIcon = null; // selbst gewählt; null = Vorschlag aus dem Namen
   const breadcrumbEl = document.getElementById("breadcrumb");
   const childrenEl = document.getElementById("children");
   const typeEl = document.getElementById("container-type");
@@ -1655,7 +2066,34 @@ function renderContainer(id) {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     previewUrl = null;
     photoPreview.innerHTML = icon("camera");
+    updateIconPick();
   }
+
+  // Icon-Vorschlag neben dem Namen (nur ohne Foto): gewähltes Icon, sonst Vorschlag, sonst neutral.
+  function formIcon() {
+    return chosenIcon || suggestIcon(form.name.value);
+  }
+  function updateIconPick() {
+    const name = form.name.value.trim();
+    const hasPhoto = !!form.photo.files[0];
+    iconPick.hidden = !name || hasPhoto;
+    if (iconPick.hidden) return;
+    const id = formIcon();
+    iconPick.classList.toggle("is-fallback", !id);
+    iconPick.innerHTML = itemIconSvg(id || FALLBACK_ICON);
+    iconPick.setAttribute("aria-label", id ? `Icon: ${ITEM_ICONS[id].label} – antippen zum Ändern` : "Icon wählen");
+  }
+  iconPick.addEventListener("click", () => {
+    showIconPicker({
+      name: form.name.value.trim(),
+      current: chosenIcon,
+      onPick: (picked) => {
+        chosenIcon = picked;
+        updateIconPick();
+        form.name.focus();
+      },
+    });
+  });
   form.photo.addEventListener("change", () => {
     resetPhotoPreview();
     const file = form.photo.files[0];
@@ -1677,7 +2115,10 @@ function renderContainer(id) {
     }
     addHint.hidden = !existing;
   }
-  form.name.addEventListener("input", updateAddHint);
+  form.name.addEventListener("input", () => {
+    updateAddHint();
+    updateIconPick();
+  });
 
   if (!isValidId(id)) {
     // z.B. von Hand verändertes ?c= – nichts automatisch anlegen.
@@ -1698,7 +2139,7 @@ function renderContainer(id) {
       mayCreate = false;
       containerName = snap.data().name || id;
       rememberRecent(id, containerName);
-    } else if (mayCreate && !snap.metadata.fromCache && isValidId(id)) {
+    } else if (mayCreate && !snap.metadata.fromCache && isValidId(id) && !readOnly()) {
       // Neuer QR-Code gescannt → Behälter anlegen (Name aus &n=, sonst die ID).
       // Nur nach Antwort vom Server, sonst würde ein leerer Offline-Cache den Namen überschreiben.
       // Nur beim Öffnen: Löscht jemand anderes den Behälter, während er hier offen ist, wird er
@@ -1739,6 +2180,7 @@ function renderContainer(id) {
   });
 
   document.getElementById("edit-btn").addEventListener("click", async () => {
+    if (blockedByLock()) return;
     try {
       await containersReady();
     } catch (err) {
@@ -1793,6 +2235,7 @@ function renderContainer(id) {
     const name = f.name.value.trim().slice(0, MAX_NAME);
     const type = CONTAINER_TYPES[f.type.value] ? f.type.value : "";
     if (!name) return;
+    if (blockedByLock()) return;
     try {
       await containersReady();
     } catch (err) {
@@ -1841,7 +2284,10 @@ function renderContainer(id) {
     if (!on) selected.clear();
     renderItems();
   }
-  document.getElementById("select-btn").addEventListener("click", () => setSelecting(!selecting));
+  document.getElementById("select-btn").addEventListener("click", () => {
+    if (!selecting && blockedByLock()) return;
+    setSelecting(!selecting);
+  });
   document.getElementById("select-cancel").addEventListener("click", () => setSelecting(false));
   document.getElementById("select-all").addEventListener("click", () => {
     const all = visibleIds; // nur sichtbare (Filter beachten)
@@ -1911,14 +2357,15 @@ function renderContainer(id) {
         continue;
       }
       const hasPhoto = isSafePhoto(item.photo);
+      const shownIcon = hasPhoto ? null : iconForItem(item);
       const busy = photosInProgress.has(`${id}/${itemId}`);
       const step = qtyStep(item.unit);
       const card = document.createElement("div");
       card.className = "card";
       card.dataset.id = itemId;
       card.innerHTML = `
-        <button type="button" class="thumb-btn${hasPhoto || busy ? "" : " no-photo"}" data-action="photo" aria-label="${hasPhoto ? "Foto anzeigen" : "Foto hinzufügen"}">
-          ${busy ? `<span class="spinner">${icon("hourglass")}</span>` : hasPhoto ? `<img class="thumb" alt="" decoding="async" />` : icon("camera")}
+        <button type="button" class="thumb-btn${hasPhoto || busy ? "" : shownIcon ? " has-icon" : " no-photo"}" data-action="photo" aria-label="${hasPhoto ? "Foto anzeigen" : shownIcon ? "Details, Icon und Foto" : "Foto hinzufügen"}">
+          ${busy ? `<span class="spinner">${icon("hourglass")}</span>` : thumbContent(item)}
         </button>
         <button type="button" class="name name-btn" data-action="details" aria-label="Details zu ${escapeHtml(item.name)}">
           <strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.unit || "")}${mhdSuffix(item.mhd)}</small>
@@ -1934,7 +2381,7 @@ function renderContainer(id) {
       if (thumb) thumb.src = item.photo;
       card.querySelector('[data-action="photo"]').addEventListener("click", () => {
         if (busy) return;
-        if (hasPhoto) showItemDetails(id, itemId, item);
+        if (hasPhoto || shownIcon || readOnly()) showItemDetails(id, itemId, item);
         else openPhotoPicker(id, itemId);
       });
       card.querySelector('[data-action="details"]').addEventListener("click", () => showItemDetails(id, itemId, item));
@@ -1968,6 +2415,7 @@ function renderContainer(id) {
 
   form.addEventListener("submit", (e) => {
     e.preventDefault();
+    if (blockedByLock()) return;
     const name = form.name.value.trim().slice(0, MAX_NAME);
     const qty = parseQty(form.qty.value);
     const unit = UNITS.includes(form.unit.value) ? form.unit.value : "Stk";
@@ -1980,21 +2428,23 @@ function renderContainer(id) {
     }
     const existing = currentItems.get(itemId);
     const plan = planAddItem(existing, { qty, unit });
+    // Icon nur ohne Foto: selbst gewählt immer, Vorschlag nur bei neuen Artikeln bzw. wenn noch keins da ist.
+    const iconId = photoFile ? null : chosenIcon || (existing && isKnownIcon(existing.icon) ? null : suggestIcon(name));
     let write;
     let message;
     if (plan.action === "conflict") {
       const ok = confirm(`"${existing.name}" ist schon vorhanden (${plan.oldQty} ${plan.oldUnit}).\nDurch ${qty} ${unit} ersetzen?`);
       if (!ok) return;
-      write = setDoc(itemRef(id, itemId), { name: existing.name, qty, unit, updatedAt: serverTimestamp() }, { merge: true });
+      const data = { name: existing.name, qty, unit, updatedAt: serverTimestamp() };
+      if (iconId) data.icon = iconId;
+      write = setDoc(itemRef(id, itemId), data, { merge: true });
       message = `"${existing.name}": jetzt ${qty} ${unit}`;
     } else {
       // increment() addiert auf dem Server – auch wenn gleichzeitig jemand anderes etwas ändert.
       // Gibt es den Artikel noch nicht, wird die Menge einfach gesetzt.
-      write = setDoc(
-        itemRef(id, itemId),
-        { name: existing ? existing.name : name, unit, qty: increment(plan.action === "add" ? plan.delta : qty), updatedAt: serverTimestamp() },
-        { merge: true }
-      );
+      const data = { name: existing ? existing.name : name, unit, qty: increment(plan.action === "add" ? plan.delta : qty), updatedAt: serverTimestamp() };
+      if (iconId) data.icon = iconId;
+      write = setDoc(itemRef(id, itemId), data, { merge: true });
       message = plan.action === "add" ? `"${existing.name}": jetzt ${plan.newQty} ${unit}` : `"${name}" hinzugefügt`;
     }
     background(write);
@@ -2002,15 +2452,19 @@ function renderContainer(id) {
     form.qty.value = 1;
     form.unit.value = unit;
     addHint.hidden = true;
+    chosenIcon = null;
     resetPhotoPreview();
     toast(message);
     if (photoFile) savePhoto(id, itemId, photoFile);
+    emit("item-added", { containerId: id, itemId });
   });
+  return true;
 }
 
 // +/−: nur die Menge ändern (increment), nicht den ganzen Artikel inkl. Foto neu schreiben.
 // So gehen gleichzeitige Änderungen auf zwei Geräten nicht verloren. g/ml in 50er-Schritten.
 function changeQty(containerId, itemId, item, direction) {
+  if (blockedByLock()) return;
   const plan = planStep(item.qty ?? 1, item.unit, direction);
   if (plan.action === "remove") {
     removeItem(containerId, itemId, item);
@@ -2019,10 +2473,12 @@ function changeQty(containerId, itemId, item, direction) {
   if (plan.action === "none") return;
   item.qty = plan.newQty; // lokal mitzählen, bis der nächste Snapshot den echten Stand bringt
   background(updateDoc(itemRef(containerId, itemId), { qty: increment(plan.delta), updatedAt: serverTimestamp() }));
+  emit("qty-changed", { containerId, itemId });
 }
 
 // Antippen der Zahl: Menge direkt eingeben (praktisch bei g/ml).
 function setQty(containerId, itemId, item) {
+  if (blockedByLock()) return;
   const input = prompt(`Neue Menge für "${item.name}" (${item.unit || ""}). 0 = entfernen`, String(item.qty ?? 1));
   if (input === null || input.trim() === "") return;
   const n = Math.round(Number(input));
@@ -2035,10 +2491,12 @@ function setQty(containerId, itemId, item) {
     return;
   }
   background(updateDoc(itemRef(containerId, itemId), { qty: Math.min(MAX_QTY, n), updatedAt: serverTimestamp() }));
+  emit("qty-changed", { containerId, itemId });
 }
 
 // Entfernen (Papierkorb fragt vorher per zweitem Tipp nach), danach noch "Rückgängig" (stellt Name, Menge, Einheit, Foto und MHD wieder her).
 function removeItem(containerId, itemId, item) {
+  if (blockedByLock()) return;
   const ref = itemRef(containerId, itemId);
   // Ältere IDs (nicht im App-Format) dürfen laut Regeln nicht neu angelegt werden.
   const slug = slugify(item.name || "");
@@ -2052,7 +2510,9 @@ function removeItem(containerId, itemId, item) {
       fn: () => {
         background(setDoc(restoreRef, backup), "Wiederherstellen");
         toast(`"${item.name}" wiederhergestellt`);
+        emit("item-restored", { containerId, itemId });
       },
     },
   });
+  emit("item-removed", { containerId, itemId });
 }
