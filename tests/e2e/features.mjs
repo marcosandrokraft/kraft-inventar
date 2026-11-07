@@ -375,6 +375,22 @@ test("F8 Einführung: Escape beendet, Hinweis 'Nein danke' bleibt weg", async ()
   await t.done();
 });
 
+test("F9 Abmelden löscht auch die Übungsdaten; Kopfzeile passt bei 360 px", async () => {
+  const t = await open("index.html", { ...MOBILE, seed: { "containers/keller": { name: "Keller" } }, init: () => {
+    try { if (!sessionStorage.getItem("__f9")) { sessionStorage.setItem("__f9", "1"); localStorage.setItem("vorrat-uebung-db", "{}"); localStorage.setItem("uebung:recentContainers", "[]"); } } catch {}
+  } });
+  const { page } = t;
+  await page.waitForSelector("#container-list a.card");
+  const right = await page.evaluate(() => Math.max(...[...document.querySelectorAll("header.app-header > :not([hidden])")].map((e) => e.getBoundingClientRect().right)));
+  assert(right <= 360 - 12, `Kopfzeile reicht bis ${right} px (Rand fehlt)`);
+  await noHorizontalScroll(page, "Kopfzeile 360 px");
+  // Der Fake meldet nach dem Neuladen wieder an – hier zählt nur, was vorher gelöscht wurde.
+  await Promise.all([page.waitForEvent("load"), page.click("#logout-btn")]);
+  const keys = await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("uebung:") || k === "vorrat-uebung-db"));
+  assertEqual(keys, [], "Übungsdaten nach Abmelden gelöscht");
+  await t.done();
+});
+
 const failed = await run(process.argv[2]);
 await browser.close();
 await server.close();

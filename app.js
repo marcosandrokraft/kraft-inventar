@@ -103,6 +103,11 @@ const {
 // settings/lock { locked, lockedBy } – bei Sperre dürfen nur Owner (members/<adresse>.role == "owner")
 // schreiben, das prüfen die Regeln. Die App zeigt das vorher an und schreibt dann gar nicht erst.
 const lockState = { locked: false, lockedBy: "", owner: false, name: "" };
+// Erfüllt, sobald Rolle und Sperre bekannt sind (im Übungsmodus sofort). Automatisches Anlegen per
+// QR-Code wartet darauf, damit bei langsamem Netz nicht in eine Sperre hineingeschrieben wird.
+let lockKnown;
+const lockReady = new Promise((resolve) => { lockKnown = resolve; });
+if (PRACTICE) lockKnown();
 function readOnly() {
   return !PRACTICE && lockState.locked && !lockState.owner;
 }
@@ -249,7 +254,7 @@ function confirmFirst(btn, fn, label = "Löschen?") {
 // vom Server kommt (ohne Netz) evtl. erst viel später. Fehler (z.B. Regeln) werden trotzdem gemeldet.
 function background(promise, what = "Speichern") {
   promise.catch((err) => {
-    if (err.code === "locked" || (err.code === "permission-denied" && lockState.locked)) {
+    if (err.code === "locked" || (err.code === "permission-denied" && lockState.locked && !lockState.owner)) {
       toast(`${LOCKED_TEXT} – nichts geändert.`, 4000);
       return;
     }
@@ -1303,6 +1308,7 @@ function showLogout(user) {
   btn.addEventListener("click", async () => {
     await signOut(auth);
     storageSet(QR_LIST_KEY, null);
+    clearPracticeStorage();
     // Offline-Kopie der Daten auf diesem Gerät löschen (wichtig auf fremden/geteilten Geräten).
     try {
       await terminate(db);
@@ -1359,24 +1365,25 @@ function toggleLock() {
 
 // Rolle (eigenes members-Dokument) und Sperre (settings/lock) beobachten. Mit älteren Regeln sind
 // beide nicht lesbar → kein Owner, nicht gesperrt (wie bisher).
-async function watchLock(user) {
+// Rolle und Sperre werden parallel geladen. Die Rolle wird nur beim Start gelesen (Änderung in der
+// Konsole wirkt nach dem Neuladen).
+function watchLock(user) {
   const email = (user.email || "").toLowerCase();
-  if (email) {
-    try {
-      const m = await getDoc(doc(db, "members", email));
-      const d = m.exists() ? m.data() : {};
-      lockState.owner = d.role === "owner";
-      lockState.name = typeof d.name === "string" ? d.name.trim().slice(0, 100) : "";
-    } catch {
-      lockState.owner = false;
-    }
-  }
+  const role = !email ? Promise.resolve() : getDoc(doc(db, "members", email)).then((m) => {
+    const d = m.exists() ? m.data() : {};
+    lockState.owner = d.role === "owner";
+    lockState.name = typeof d.name === "string" ? d.name.trim().slice(0, 100) : "";
+  }).catch(() => { lockState.owner = false; });
+  let firstLock;
+  const lockLoaded = new Promise((resolve) => { firstLock = resolve; });
   onSnapshot(doc(db, "settings", "lock"), (snap) => {
     const d = snap.exists() ? snap.data() : {};
     lockState.locked = d.locked === true;
     lockState.lockedBy = typeof d.lockedBy === "string" ? d.lockedBy.slice(0, 100) : "";
-    updateModeBar(); // Bedienelemente blendet CSS aus (body.read-only), kein Neuaufbau der Liste nötig
-  }, () => {});
+    firstLock();
+    role.then(updateModeBar); // Bedienelemente blendet CSS aus (body.read-only), kein Neuaufbau nötig
+  }, () => firstLock());
+  Promise.all([role, lockLoaded]).then(() => { updateModeBar(); lockKnown(); });
 }
 
 // --- Hilfe: Einführung, Übungsmodus, Sperre (Owner) ---
@@ -1413,6 +1420,15 @@ function endPractice() {
     try { sessionStorage.removeItem(PRACTICE_KEY); } catch {}
     location.href = "index.html?uebung=0";
   });
+}
+
+// Übungsdaten dieses Geräts löschen (beim Abmelden – z.B. auf einem fremden Gerät).
+function clearPracticeStorage() {
+  try {
+    for (const k of Object.keys(localStorage)) {
+      if (k.startsWith("uebung:") || k === "vorrat-uebung-db") localStorage.removeItem(k);
+    }
+  } catch {}
 }
 
 // Übungsdaten auf die Beispieldaten zurücksetzen (inkl. "Zuletzt" usw. der Übung).
@@ -1985,7 +2001,10 @@ function renderContainer(id) {
     main.innerHTML = `<p class="empty-hint">Ungültiger Behälter-Link.<br><a href="index.html">Zur Übersicht</a></p>`;
     return false;
   }
-  if (PRACTICE && practiceLinkAction({ hasPracticeParam: practiceParam(location.search) === true, internal: cameFromApp() }) === "real") {
+  // Gibt es den Behälter in der Übung (Lesezeichen, Referrer fehlt), einfach öffnen – auch wenn die
+  // ID zufällig wie ein echter Behälter heisst, ändert das nur Übungsdaten.
+  const inPractice = PRACTICE && !!firestoreMod.practiceSnapshot()[`containers/${id}`];
+  if (PRACTICE && !inPractice && practiceLinkAction({ hasPracticeParam: practiceParam(location.search) === true, internal: cameFromApp() }) === "real") {
     renderRealCodeHint(id);
     return false;
   }
@@ -2147,7 +2166,12 @@ function renderContainer(id) {
       mayCreate = false;
       const n = (params.get("n") || "").trim().slice(0, MAX_NAME);
       containerName = n || id;
-      background(setDoc(doc(db, "containers", id), { name: containerName, createdAt: serverTimestamp() }, { merge: true }), "Anlegen");
+      const name = containerName;
+      // Erst wenn klar ist, ob gesperrt ist (sonst bei langsamem Netz Schreibversuch in die Sperre).
+      lockReady.then(() => {
+        if (readOnly() || deleted) return;
+        background(setDoc(doc(db, "containers", id), { name, createdAt: serverTimestamp() }, { merge: true }), "Anlegen");
+      });
     }
     titleEl.textContent = containerName;
     document.title = `${containerName} – Vorrat`;

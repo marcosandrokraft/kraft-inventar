@@ -11,7 +11,13 @@ const size = document.getElementById("size");
 const count = document.getElementById("count");
 const printBtn = document.getElementById("print-btn");
 // Aus dem Übungsmodus geöffnet (?uebung=1): Übungs-Codes – sie öffnen nur Übungsbehälter, nie echte.
-const practice = new URLSearchParams(location.search).get("uebung") === "1";
+// Auch ohne Parameter (z.B. Link in neuem Tab), wenn dieser Tab im Übungsmodus ist.
+function isPractice() {
+  const v = new URLSearchParams(location.search).get("uebung");
+  if (v === "1" || v === "0") return v === "1";
+  try { return sessionStorage.getItem("vorrat-uebung-aktiv") === "1"; } catch { return false; }
+}
+const practice = isPractice();
 if (practice) {
   document.getElementById("practice-note").hidden = false;
   document.title = "Übungs-QR-Codes";

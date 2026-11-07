@@ -99,7 +99,7 @@ export const TUTORIAL_STEPS = [
     targets: [{ sel: '#items > .card[data-id] [data-action="details"]' }, { sel: '#items [data-action="details"]' }],
     advance: { event: "mhd-saved" },
     nav: TO_FRIDGE,
-    dialogText: "MHD wählen, z.B. «+1 Woche», und speichern.",
+    dialogText: "Tippe auf «MHD» und wähle z.B. «+1 Woche».",
   },
   {
     id: "loeschen",
