@@ -3,7 +3,7 @@
 // Firebase-Bibliotheken (selbst gehostet unter vendor/, feste Version im Pfad, ändern sich nie):
 // cache-first – schneller Start und die App öffnet sich auch ohne Netz (Daten kommen dann aus dem
 // Firestore-Offline-Speicher). Neue Firebase-Version = neuer Ordnername (siehe vendor/…/README.txt).
-const CACHE = "vorrat-shell-v13";
+const CACHE = "vorrat-shell-v14";
 const LIB_CACHE = "vorrat-libs-v2";
 const FIREBASE_DIR = "vendor/firebase-10.14.1/";
 const LIBS = ["firebase-app.js", "firebase-firestore.js", "firebase-auth.js"].map((f) => FIREBASE_DIR + f);
@@ -11,6 +11,8 @@ const SHELL = [
   "./", "index.html", "app.js", "lib.js", "ocr.js", "firebase-config.js", "register-sw.js", "style.css",
   "manifest.json", "icon.svg", "qr.html", "qr.js", "vendor/qrcode-generator-1.4.4.js", "vendor/jsqr-1.4.0/jsQR.js",
   "vendor/fonts/manrope/manrope-latin-wght-normal.woff2",
+  // Icon-Vorschlag, Übungsmodus (Daten nur in localStorage, nie im Cache) und Einführung
+  "item-icons.js", "icon-match.js", "uebung-firebase.js", "uebung-daten.js", "tutorial.js", "tutorial.css",
 ];
 const FIREBASE_PREFIX = new URL(FIREBASE_DIR, self.location.href).href;
 
