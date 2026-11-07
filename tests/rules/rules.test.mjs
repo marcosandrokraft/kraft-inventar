@@ -20,6 +20,7 @@ firebase.firestore.setLogLevel("silent");
 
 const PROJECT_ID = "demo-kraft-inventar";
 const MEMBER = "alice@example.com";
+const OWNER = "owner@example.com";
 
 let testEnv;
 
@@ -66,6 +67,7 @@ describe("firestore.rules", function () {
     await testEnv.clearFirestore();
     await seed(async (db) => {
       await db.doc(`members/${MEMBER}`).set({ note: "Testmitglied" });
+      await db.doc(`members/${OWNER}`).set({ role: "owner", name: "Marco" });
       await db.doc("containers/keller").set({ name: "Keller" });
       await db.doc("containers/keller/items/reis").set({ name: "Reis", qty: 1, unit: "Packung" });
     });
@@ -137,13 +139,26 @@ describe("firestore.rules", function () {
       await assertSucceeds(db.doc("containers/keller/items/nudeln").set(validItem()));
     });
 
-    it("members-Sammlung ist weder les- noch schreibbar (auch nicht für Mitglieder)", async () => {
+    it("members: nur eigenes Dokument lesbar, fremde/Liste nicht, Schreiben nie", async () => {
       const db = member();
-      await assertFails(db.doc(`members/${MEMBER}`).get());
+      await assertSucceeds(db.doc(`members/${MEMBER}`).get());
+      await assertSucceeds(member("Alice@Example.COM").doc(`members/${MEMBER}`).get());
+      await assertFails(db.doc(`members/${OWNER}`).get());
       await assertFails(db.collection("members").get());
       await assertFails(db.doc("members/mallory@example.com").set({ x: 1 }));
+      await assertFails(db.doc(`members/${MEMBER}`).set({ role: "owner" }, { merge: true }));
+      await assertFails(db.doc(`members/${MEMBER}`).update({ role: "owner" }));
       await assertFails(db.doc(`members/${MEMBER}`).delete());
+      const owner = member(OWNER, "owner");
+      await assertSucceeds(owner.doc(`members/${OWNER}`).get());
+      await assertFails(owner.doc(`members/${MEMBER}`).get());
+      await assertFails(owner.collection("members").get());
+      await assertFails(owner.doc(`members/${MEMBER}`).set({ role: "owner" }, { merge: true }));
+      await assertFails(owner.doc(`members/${OWNER}`).set({ name: "X" }, { merge: true }));
+      await assertFails(owner.doc(`members/${MEMBER}`).delete());
+      await assertFails(owner.doc("members/neu@example.com").set({ role: "owner" }));
       const outsider = member("mallory@example.com", "mallory");
+      await assertFails(outsider.doc("members/mallory@example.com").get());
       await assertFails(outsider.doc("members/mallory@example.com").set({ x: 1 }));
     });
 

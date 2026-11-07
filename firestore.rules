@@ -15,9 +15,54 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/members/$(request.auth.token.email.lower()));
     }
 
-    // Die Mitgliederliste kann aus der App weder gelesen noch geändert werden.
+    // Pfad zum eigenen members-Dokument (nur nach isMember() verwenden, dann ist email ein String).
+    function ownMemberPath() {
+      return /databases/$(database)/documents/members/$(request.auth.token.email.lower());
+    }
+
+    // Owner = Mitglied, dessen eigenes members-Dokument role == "owner" hat (nur exakt dieser Wert).
+    // Wird nur in der Firebase-Konsole gesetzt; die App kann members nicht schreiben.
+    function isOwner() {
+      return isMember() && get(ownMemberPath()).data.get('role', '') == 'owner';
+    }
+
+    // Sperre: Dokument settings/lock mit locked == true. Fehlt es, ist nichts gesperrt.
+    // exists() zuerst, damit get() nie auf ein fehlendes Dokument läuft.
+    function lockPath() {
+      return /databases/$(database)/documents/settings/lock;
+    }
+    function isLocked() {
+      return exists(lockPath()) && get(lockPath()).data.get('locked', false) == true;
+    }
+
+    // Schreiben unter containers/**: Mitglied, und bei aktiver Sperre nur der Owner.
+    // Reihenfolge: im Normalfall (nicht gesperrt) wird das members-Dokument nicht gelesen,
+    // nur exists() auf members und settings/lock.
+    function mayWrite() {
+      return isMember() && (!isLocked() || isOwner());
+    }
+
+    // Die Mitgliederliste kann aus der App nicht geändert und nicht aufgelistet werden.
+    // Lesen nur des EIGENEN Dokuments (App erfährt so role und name), fremde bleiben verborgen.
     match /members/{email} {
-      allow read, write: if false;
+      allow get: if isMember() && email == request.auth.token.email.lower();
+      allow list, write: if false;
+    }
+
+    // Form von settings/lock: locked Pflicht, lockedAt/lockedBy optional (Anzeigename, keine E-Mail).
+    function validLock(d) {
+      return d.keys().hasOnly(['locked', 'lockedAt', 'lockedBy'])
+        && d.locked is bool
+        && (!('lockedAt' in d) || d.lockedAt is timestamp)
+        && (!('lockedBy' in d) || (d.lockedBy is string && d.lockedBy.size() > 0 && d.lockedBy.size() <= 100));
+    }
+
+    // Sperre lesen dürfen alle Mitglieder, setzen/aufheben/löschen nur der Owner.
+    // Andere Dokumente unter settings/ haben keine Regel und sind damit gesperrt.
+    match /settings/lock {
+      allow read: if isMember();
+      allow create, update: if isOwner() && validLock(request.resource.data);
+      allow delete: if isOwner();
     }
 
     // IDs, wie sie die App aus Namen erzeugt (slugify): Kleinbuchstaben, Ziffern, Umlaute, Bindestrich.
@@ -54,29 +99,35 @@ service cloud.firestore {
     }
 
     function validItem(d) {
-      return d.keys().hasOnly(['name', 'qty', 'unit', 'photo', 'mhd', 'updatedAt'])
+      return d.keys().hasOnly(['name', 'qty', 'unit', 'photo', 'mhd', 'icon', 'updatedAt'])
         && validName(d)
         && d.qty is int && d.qty >= 1 && d.qty <= 100000
         // unit darf fehlen (ältere Artikel; die App zeigt dann "Stk"), sonst nur bekannte Einheiten
         && (!('unit' in d) || d.unit in ['Stk', 'Packung', 'Flasche', 'Dose', 'Glas', 'g', 'kg', 'ml', 'l'])
         && (!('mhd' in d) || validMhd(d.mhd))
         && (!('photo' in d) || validPhoto(d.photo))
+        // icon (optional): Icon-ID wie "milk" oder "leafy-green"
+        && (!('icon' in d) || (d.icon is string && d.icon.matches('^[a-z0-9-]{1,40}$')))
         && (!('updatedAt' in d) || d.updatedAt is timestamp);
     }
 
+    // Lesen: alle Mitglieder (auch bei Sperre). Schreiben: mayWrite() (bei Sperre nur Owner).
+    // Formprüfung vor mayWrite(), damit ungültige Anfragen keine Dokument-Zugriffe kosten.
     match /containers/{containerId} {
       allow read: if isMember();
-      allow create: if isMember() && validId(containerId) && validContainer(request.resource.data, containerId);
-      allow update: if isMember() && containerId.size() <= 100 && validContainer(request.resource.data, containerId);
+      allow create: if validId(containerId) && validContainer(request.resource.data, containerId) && mayWrite();
+      allow update: if containerId.size() <= 100 && validContainer(request.resource.data, containerId) && mayWrite();
       // Löschen nur für Mitglieder; "nur wenn leer" prüft die App (Regeln können keine Unterdokumente
       // zählen). Artikel eines gelöschten Behälters wären weiterhin über den Pfad erreichbar.
-      allow delete: if isMember();
+      allow delete: if mayWrite();
 
       match /items/{itemId} {
-        allow read, delete: if isMember();
-        allow create: if isMember() && validId(itemId) && validItem(request.resource.data)
-          && 'unit' in request.resource.data; // neue Artikel immer mit Einheit
-        allow update: if isMember() && itemId.size() <= 100 && validItem(request.resource.data);
+        allow read: if isMember();
+        allow delete: if mayWrite();
+        allow create: if validId(itemId) && validItem(request.resource.data)
+          && 'unit' in request.resource.data // neue Artikel immer mit Einheit
+          && mayWrite();
+        allow update: if itemId.size() <= 100 && validItem(request.resource.data) && mayWrite();
       }
     }
 
