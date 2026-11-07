@@ -1,6 +1,6 @@
 # Aktueller Stand
 
-Letzter Stand: 2026-10-31, Runde 3 (Branch `verbesserungen-2026-10-31`, noch nicht gemergt). Diese Datei fasst den Fortschritt zusammen, damit man (auch mit einer
+Letzter Stand: 2026-11-07, Paket "Übung & Icons" (Branch `features-uebung`, noch nicht gemergt). Diese Datei fasst den Fortschritt zusammen, damit man (auch mit einer
 neuen Claude-Session auf einem anderen Gerät) nahtlos weitermachen kann.
 
 **Die App läuft:** https://marcosandrokraft.github.io/kraft-inventar/ – mit Anmeldung per E-Mail-Link,
@@ -22,6 +22,51 @@ Zugriff nur für freigeschaltete Personen.
   auf das Objekt, grössere Vorschaubilder, Grossansicht mit "Foto ändern". Freistellung lokal in
   Chrome getestet (vorher war sie wegen falscher Bibliothek-URL nie gelaufen). Erstes Foto pro Gerät
   lädt ca. 56 MB KI-Modell → im WLAN machen.
+
+## Paket "Übung & Icons" (2026-11-07, Branch `features-uebung`, noch nicht gemergt/gepusht)
+
+**Was du tun musst (genau in dieser Reihenfolge):**
+
+1. **Owner-Feld setzen:** Firebase-Konsole → Firestore Database → Daten → Sammlung `members` →
+   dein eigenes Dokument öffnen → "Feld hinzufügen": Name `role`, Typ string, Wert `owner` (genau so,
+   klein) → Speichern. Hat dein Dokument noch kein Feld `name`, ebenfalls ergänzen (wird bei einer Sperre
+   als "gesperrt von …" angezeigt – nie die Adresse). Nur Owner können sperren; niemand kann sich über
+   die App selbst zum Owner machen (members bleibt für die App nicht schreibbar).
+2. **Regeln veröffentlichen – VOR dem Merge/Push:** Firestore Database → Regeln → kompletten Inhalt
+   von [firestore.rules](firestore.rules) einfügen → Veröffentlichen. Sonst lehnt Firestore jeden neuen
+   Artikel mit Icon ab ("Speichern fehlgeschlagen (permission-denied)"), und Sperre/Rolle funktionieren
+   nicht. Die neuen Regeln akzeptieren alle alten Daten und die alte App-Version. (Nicht automatisch deployt.)
+3. **Lokal ansehen** (`npx http-server .`): Hilfe (?) oben, "Ohne Anmeldung ausprobieren" auf der
+   Anmeldeseite, Einführung, Icon-Vorschlag beim Hinzufügen, als Owner "Echte Daten sperren".
+4. **Dann mergen und pushen:** `git checkout main && git merge features-uebung && git push`.
+   Danach auf den Handys 1–2× neu laden (Service Worker **v14**).
+
+**Umgesetzt:**
+
+- **Icon-Vorschlag statt Foto:** 85 Strich-Icons aus Lucide (`lucide-static@1.61.0`, ISC – Lizenz und
+  Herkunft in `vendor/lucide/`, erzeugt mit `tools/build-item-icons.mjs`, nicht abgetippt). Deutsche
+  Schlagwörter mit Synonymen, Schweizer Wörtern (Rüebli, Anke, Poulet, Glace, Guetzli), Plural und
+  Komposita (Kopf am Ende: "Vollmilch" → Milch, "Milchschokolade" → Süsses, "Apfelsaft" → Saft).
+  Kein Käse-/Brot-/Nudel-Icon bei Lucide → Ersatz (Quader "Käse & Butter", Sandwich, Ähre).
+  Neues optionales Feld `icon` (Regeln: `^[a-z0-9-]{1,40}$`). Ohne Foto wird der Vorschlag bzw. das
+  gewählte Icon gespeichert; ältere Artikel zeigen den Vorschlag ohne Schreibzugriff.
+- **Übungsmodus** (`?uebung=1`, Schalter pro Tab): eigene Datenschicht `uebung-firebase.js` mit
+  Beispieldaten (Küche › Kühlschrank › Gemüsefach, Vorratsschrank, Keller › Werkzeugbox, Bad ›
+  Spiegelschrank; MHD abgelaufen/heute/bald). Firebase wird im Übungsmodus gar nicht geladen – kein
+  Kontakt zur echten Datenbank, ihr Offline-Speicher bleibt unberührt. "Zuletzt" usw. getrennt
+  (`uebung:`-Schlüssel). Abmelden löscht auch die Übungsdaten des Geräts.
+- **Sperre:** Dokument `settings/lock` { locked, lockedAt, lockedBy } – nur Owner schreiben es. Bei
+  Sperre lehnen die Regeln jedes Schreiben unter `containers/**` von Nicht-Ownern ab; Lesen bleibt.
+  Die App zeigt den Balken "Vorübergehend gesperrt – nur Lesen" (Owner: "Gesperrt für andere") und
+  blendet für Nicht-Owner alle Ändern-Knöpfe aus. Mitglieder dürfen jetzt ihr **eigenes**
+  members-Dokument lesen (für Rolle und Name). Die Rolle wird beim Start gelesen (Änderung in der
+  Konsole wirkt nach dem Neuladen).
+- **Einführung** (`tutorial.js`): Hilfe (?) → "Einführung starten", 13 Schritte im Übungsmodus,
+  interaktiv (geht weiter, wenn die Aktion gemacht wurde), einmaliger Hinweis für neue Geräte.
+
+**Tests:** siehe [TESTS.md](TESTS.md) – `npm test` 156/156, `npm run test:rules` 80/80 (Emulator,
+portable Java 17), `npm run test:e2e` 26/26 + 9/9, `test:e2e:cutout` ok, `test:e2e:ocr` ok.
+Nicht getestet: echte Firebase-Datenbank (Regeln nur im Emulator), echte Handys, echter QR-Scan.
 
 ## Weitere Person freischalten
 

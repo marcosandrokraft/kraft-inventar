@@ -106,12 +106,29 @@ die Regeln in der Konsole erneut veröffentlichen.
 - Über "Übersicht" (oben oder unten) siehst du alle Behälter der obersten Ebene und kannst auch dort neue anlegen
   (z.B. falls du mal ohne QR-Code schnell etwas eintragen willst).
 - "Zum Home-Bildschirm hinzufügen" (iOS/Android-Browser-Menü) macht daraus ein App-Icon ohne Appstore.
+- **Icon statt Foto:** Beim Eintippen eines Namens ("Vollmilch", "Bergkäse", "Spaghetti") schlägt die
+  App ein Strich-Icon vor (Feld neben der Kamera, antippen zum Ändern). Ohne Foto wird es gespeichert.
+  Anzeige: Foto vor Icon vor Vorschlag aus dem Namen (auch für ältere Artikel) vor Kamera. In den
+  Details: "Icon wählen" (Raster mit Suche) und "Foto".
+- **Übungsmodus:** Hilfe (?) oben → "Übungsmodus", oder auf der Anmeldeseite "Ohne Anmeldung
+  ausprobieren". Beispieldaten nur auf diesem Gerät (localStorage), Firebase wird dabei gar nicht
+  geladen – das echte Inventar bleibt unberührt. Gilt für diesen Tab (beim nächsten Öffnen sind die
+  echten Daten da), "Übung zurücksetzen" in der Hilfe. Die QR-Druckseite erzeugt im Übungsmodus
+  Übungs-Codes (`?uebung=1`); echte Codes öffnen sich im Übungsmodus nicht, es erscheint ein Hinweis.
+- **Einführung:** Hilfe (?) → "Einführung starten" – führt im Übungsmodus in 13 Schritten durch die
+  App (Spotlight, Weiter/Zurück, Escape beendet). Neue Geräte sehen einmal einen kleinen Hinweis.
+- **Sperre (Owner):** Wer in `members` das Feld `role: "owner"` hat, kann in der Hilfe die echten Daten
+  für alle anderen sperren ("nur Lesen", Balken oben) und wieder entsperren. Die Regeln setzen das durch.
 
 ## Dateien
 
 - `index.html` / `app.js` – Haupt-App (Übersicht + Behälter-Ansicht je nach `?c=`-Parameter)
 - `lib.js` – reine Logik (IDs, Suche, Mengen, Zuschnitt, Pfade, MHD, Datums-/GS1-Erkennung),
   getestet in `tests/unit`
+- `item-icons.js` (aus Lucide erzeugt, ISC – `vendor/lucide/`, `tools/build-item-icons.mjs`) und
+  `icon-match.js` (deutsche Schlagwörter → Icon)
+- `uebung-firebase.js` / `uebung-daten.js` – Übungsmodus: Ersatz für Firebase mit Beispieldaten in localStorage
+- `tutorial.js` / `tutorial.css` – Einführung (Coach-Marks)
 - `ocr.js` – Experiment Texterkennung fürs MHD (lädt tesseract.js erst bei Bedarf)
 - `vendor/firebase-10.14.1/` – Firebase-Bibliotheken, selbst gehostet (Apache-2.0, siehe README.txt dort)
 - `qr.html` / `qr.js` / `vendor/qrcode-generator-1.4.4.js` – QR-Code-Druckbogen

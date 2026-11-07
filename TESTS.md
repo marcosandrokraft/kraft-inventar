@@ -10,6 +10,11 @@ GS1-Verfallsdatum (AI 17, ersatzweise Mindesthaltbarkeit AI 15) aus DataMatrix-R
 `tests/unit/runde3.test.mjs`: Liste "läuft bald ab" (Filter 3/7 Tage, Sortierung, Monats-/Jahreswechsel,
 Sommerzeit, Texte "heute"/"in 3 Tagen"), Umzugsziel aus gescanntem QR-Code (fremde Links, eigener und
 unbekannter Behälter werden abgelehnt).
+Paket Übungsmodus/Icons/Einführung: `tests/unit/icons.test.mjs` (125 Namen → Icon, Komposita, Plural,
+Fehltreffer wie "Bleistift" ≠ Ei, Datenprüfung der Icons), `tests/unit/uebung.test.mjs` (Übungs-Datenschicht:
+Beispieldaten gültig, set/merge/update/delete, increment, Batch atomar, Abfragen, Listener, Persistenz,
+voller Speicher), `tests/unit/tutorial.test.mjs` (Schritte, Zustand, Bedingungen),
+`tests/unit/uebung-links.test.mjs` (Übungs-QR-Links, Scan echter/Übungs-Codes).
 Braucht nur Node.js (getestet mit v16.16.0), kein Java, kein Netz:
 
 ```sh
@@ -23,6 +28,14 @@ Die Datei `tests/rules/rules.test.mjs` prüft `firestore.rules` gegen den lokale
 Firestore-Emulator (Zugriff nur für Mitglieder, Validierung von Namen/Menge/Einheit/Foto,
 gültige IDs, `increment`, Collection-Group-Suche, Verschieben per Batch; Runde 2: `type`/`parent`
 am Behälter, Behälter löschen, `mhd` am Artikel, neue Einheiten, Umzug mehrerer Artikel per Batch).
+
+`tests/rules/lock.test.mjs` prüft das optionale Artikel-Feld `icon` (Muster `^[a-z0-9-]{1,40}$`), die
+Owner-Rolle (`role == "owner"` im eigenen members-Dokument, nur in der Konsole setzbar) und die Sperre über
+`settings/lock`: Bei `locked == true` dürfen nur Owner unter `containers/**` schreiben, Lesen bleibt für
+alle Mitglieder erlaubt. Mitglieder dürfen ihr eigenes members-Dokument lesen (für role/name), fremde
+und die Liste nicht; members bleibt für alle unschreibbar. Ein Batch-Test mit 8 verschobenen Artikeln
+(16 Schreibvorgänge) zeigt, dass wiederholte `get()`/`exists()` auf dasselbe Dokument nur einmal gegen
+das Limit von 20 pro Batch zählen (nur im Emulator geprüft).
 
 ### Voraussetzungen
 
@@ -88,6 +101,15 @@ fremder Code, eigener und unbekannter Behälter abgelehnt (nichts angelegt), Esc
 Scanner, gültiges Ziel wird ausgewählt und verschoben.
 Firebase wird seit Runde 2 aus `vendor/firebase-10.14.1/` geladen; die Tests ersetzen genau diese
 Dateien durch die Fakes, jede Anfrage an gstatic.com gilt als Fehler.
+
+`tests/e2e/features.mjs` (läuft mit `npm run test:e2e` nach smoke.mjs; einzeln:
+`node tests/e2e/features.mjs <filter>`): F1–F2 Icon-Vorschlag, Wahl im Raster, Anzeige-Reihenfolge,
+Icons in Suche/Ablaufliste, 360 px; F3–F4 Übungsmodus ohne Anmeldung (Firebase wird nicht ausgeführt,
+keine Anfragen an Google), Speichern in localStorage, Zurücksetzen, Beenden, Übungs-QR-Codes, echter
+Code im Übungsmodus → nur Hinweis; F5–F6 Sperre als Nicht-Owner (alles ausgeblendet, keine Schreibzugriffe)
+und als Owner (sperren/entsperren mit Bestätigung, Name statt Adresse); F7–F8 Einführung komplett
+durchgespielt (13 Schritte, 360 px), Hinweis einmalig, Escape; F9 Abmelden löscht Übungsdaten,
+Kopfzeile bei 360 px.
 
 ```sh
 npm run test:e2e
