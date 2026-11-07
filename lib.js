@@ -146,11 +146,35 @@ export function parseQrPage(search) {
 
 // Link, den ein QR-Code öffnet. Der Name wird mitgegeben, damit ein neu angelegter Behälter gleich
 // richtig heisst (ältere QR-Codes ohne &n= funktionieren weiterhin).
-export function containerUrl(baseHref, id, name) {
+export function containerUrl(baseHref, id, name, { practice = false } = {}) {
   const url = new URL("index.html", baseHref);
-  url.search = `?c=${encodeURIComponent(id)}`;
+  url.search = `?${practice ? `${PRACTICE_PARAM}=1&` : ""}c=${encodeURIComponent(id)}`;
   if (name && name !== id) url.search += `&n=${encodeURIComponent(name)}`;
   return url.href;
+}
+
+// --- Übungsmodus ---
+// Übungs-Links (Druckseite im Übungsmodus, Einstieg "Ohne Anmeldung ausprobieren") tragen ?uebung=1.
+export const PRACTICE_PARAM = "uebung";
+
+// Schalter aus der Adresse: "1" = Übung starten, "0" = beenden, sonst null (gespeicherten Stand nehmen).
+export function practiceParam(search) {
+  const v = new URLSearchParams(search).get(PRACTICE_PARAM);
+  return v === "1" ? true : v === "0" ? false : null;
+}
+
+// Gescannter Text → { id, practice } (practice = Übungs-Code) oder null (kein Behälter-Link dieser App).
+export function scanTarget(text, appHref) {
+  const id = containerIdFromScan(text, appHref);
+  if (!id) return null;
+  return { id, practice: practiceParam(new URL(String(text).trim()).search) === true };
+}
+
+// Was tun mit einem Behälter-Link, der im Übungsmodus von aussen kommt (Kamera-App, Lesezeichen)?
+// Übungs-Code oder Navigation innerhalb der App → "open"; echter Code von aussen → "real"
+// (Hinweis zeigen, nichts anlegen, echte Daten bleiben unberührt).
+export function practiceLinkAction({ hasPracticeParam, internal }) {
+  return hasPracticeParam || internal ? "open" : "real";
 }
 
 // Freistellung nachbearbeiten: fast durchsichtige Reste entfernen (verändert `data` direkt) und das
