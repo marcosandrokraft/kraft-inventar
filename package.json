@@ -6,7 +6,7 @@
   "scripts": {
     "test": "mocha \"tests/unit/**/*.test.mjs\"",
     "test:rules": "firebase emulators:exec --only firestore --project demo-kraft-inventar \"mocha --timeout 20000 tests/rules/*.test.mjs\"",
-    "test:e2e": "node tests/e2e/smoke.mjs",
+    "test:e2e": "node tests/e2e/smoke.mjs && node tests/e2e/features.mjs",
     "test:e2e:cutout": "node tests/e2e/csp-cutout.mjs",
     "test:e2e:ocr": "node tests/e2e/csp-ocr.mjs"
   },
