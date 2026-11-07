@@ -107,9 +107,10 @@ die Regeln in der Konsole erneut veröffentlichen.
   (z.B. falls du mal ohne QR-Code schnell etwas eintragen willst).
 - "Zum Home-Bildschirm hinzufügen" (iOS/Android-Browser-Menü) macht daraus ein App-Icon ohne Appstore.
 - **Icon statt Foto:** Beim Eintippen eines Namens ("Vollmilch", "Bergkäse", "Spaghetti") schlägt die
-  App ein Strich-Icon vor (Feld neben der Kamera, antippen zum Ändern). Ohne Foto wird es gespeichert.
-  Anzeige: Foto vor Icon vor Vorschlag aus dem Namen (auch für ältere Artikel) vor Kamera. In den
-  Details: "Icon wählen" (Raster mit Suche) und "Foto".
+  App ein Strich-Icon vor (Feld neben der Kamera, antippen zum Ändern). Gespeichert wird nur ein
+  selbst gewähltes Icon; der Vorschlag wird immer neu aus dem Namen abgeleitet. Anzeige: Foto vor
+  gewähltem Icon vor Vorschlag aus dem Namen vor Kamera. In den Details: "Icon wählen" (Raster mit
+  Suche, "Automatisch (aus dem Namen)" entfernt ein gewähltes Icon) und "Foto".
 - **Übungsmodus:** Hilfe (?) oben → "Übungsmodus", oder auf der Anmeldeseite "Ohne Anmeldung
   ausprobieren". Beispieldaten nur auf diesem Gerät (localStorage), Firebase wird dabei gar nicht
   geladen – das echte Inventar bleibt unberührt. Gilt für diesen Tab (beim nächsten Öffnen sind die

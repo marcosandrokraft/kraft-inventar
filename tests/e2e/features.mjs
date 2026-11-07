@@ -90,7 +90,8 @@ test("F1 Icon-Vorschlag beim Hinzufügen, Wahl im Raster, Anzeige-Reihenfolge", 
   await page.click('#add-item-form button[type="submit"]');
   await waitUntil(page, () => !!document.querySelector('#items .card[data-id="vollmilch"]'));
   let w = await t.writes();
-  assertEqual(w[0].data.icon, "milk", "Vorgeschlagenes Icon gespeichert");
+  assert(!("icon" in w[0].data), "Vorschlag wird NICHT gespeichert (nur angezeigt)");
+  assert(await page.locator('#items .card[data-id="vollmilch"] svg.item-icon').count() === 1, "Vorschlag wird in der Liste angezeigt");
 
   // Kein Treffer → neutrales Icon, antippen → Raster mit Suche → Hammer
   await page.fill('#add-item-form input[name="name"]', "Dingsbums");
@@ -108,6 +109,12 @@ test("F1 Icon-Vorschlag beim Hinzufügen, Wahl im Raster, Anzeige-Reihenfolge", 
   await waitUntil(page, () => !!document.querySelector('#items .card[data-id="dingsbums"]'));
   w = await t.writes();
   assertEqual(w[1].data.icon, "hammer", "Selbst gewähltes Icon gespeichert");
+  // Nach dem Hinzufügen ist die Wahl zurückgesetzt: nächster Artikel ohne Wahl speichert wieder nichts
+  await page.fill('#add-item-form input[name="name"]', "Senf");
+  await page.click('#add-item-form button[type="submit"]');
+  await waitUntil(page, () => !!document.querySelector('#items .card[data-id="senf"]'));
+  w = await t.writes();
+  assert(!("icon" in w[2].data), "Ohne Auswahl kein icon-Feld");
 
   // Detailansicht: "Icon wählen" ändert nur icon
   await page.click('#items .card[data-id="eier"] [data-action="details"]');
@@ -178,7 +185,7 @@ test("F3 Übungsmodus ohne Anmeldung: Beispieldaten, nichts an Firebase, Speiche
   await page.reload();
   await page.waitForSelector('#items .card[data-id="bergkäse"]');
   const pdb = await t.practiceDb();
-  assertEqual(pdb.docs["containers/kuehlschrank/items/bergkäse"].icon, "cuboid", "Übungsdaten in localStorage mit Icon");
+  assert(pdb.docs["containers/kuehlschrank/items/bergkäse"] && !("icon" in pdb.docs["containers/kuehlschrank/items/bergkäse"]), "Übungsdaten in localStorage, Vorschlag nicht gespeichert");
   const keys = await page.evaluate(() => Object.keys(localStorage));
   assert(keys.includes("uebung:recentContainers") && !keys.includes("recentContainers"), `Zuletzt getrennt gespeichert: ${keys}`);
 

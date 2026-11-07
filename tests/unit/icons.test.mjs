@@ -7,6 +7,7 @@ import {
   searchIcons,
   FALLBACK_ICON,
   KEYWORD_ICON_IDS,
+  iconToStore,
 } from "../../icon-match.js";
 
 const EXPECTED = {
@@ -279,6 +280,20 @@ describe("isKnownIcon / iconForItem / FALLBACK_ICON", () => {
     assert.equal(iconForItem({ name: "Xyzzy" }), null);
     assert.equal(iconForItem({}), null);
     assert.equal(iconForItem(null), null);
+  });
+});
+
+describe("iconToStore (nur selbst gewählte Icons werden gespeichert)", () => {
+  it("gewähltes bekanntes Icon → speichern", () => {
+    assert.equal(iconToStore("hammer"), "hammer");
+    assert.equal(iconToStore("cheese"), "cheese");
+  });
+  it("nichts gewählt (Vorschlag) oder ungültig → kein Feld", () => {
+    assert.equal(iconToStore(null), null);
+    assert.equal(iconToStore(undefined), null);
+    assert.equal(iconToStore(""), null);
+    assert.equal(iconToStore("<script>"), null);
+    assert.equal(iconToStore("__proto__"), null);
   });
 });
 

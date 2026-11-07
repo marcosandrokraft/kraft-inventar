@@ -43,13 +43,15 @@ Zugriff nur für freigeschaltete Personen.
 
 **Umgesetzt:**
 
-- **Icon-Vorschlag statt Foto:** 85 Strich-Icons aus Lucide (`lucide-static@1.61.0`, ISC – Lizenz und
-  Herkunft in `vendor/lucide/`, erzeugt mit `tools/build-item-icons.mjs`, nicht abgetippt). Deutsche
+- **Icon-Vorschlag statt Foto:** 89 Strich-Icons – 85 aus Lucide (`lucide-static@1.61.0`, ISC) und
+  Käse, Brot, Baguette, Nudeln aus Tabler (`@tabler/icons@3.24.0`, MIT); Lizenz und Herkunft in
+  `vendor/lucide/` bzw. `vendor/tabler/`, erzeugt mit `tools/build-item-icons.mjs`, nicht abgetippt. Deutsche
   Schlagwörter mit Synonymen, Schweizer Wörtern (Rüebli, Anke, Poulet, Glace, Guetzli), Plural und
   Komposita (Kopf am Ende: "Vollmilch" → Milch, "Milchschokolade" → Süsses, "Apfelsaft" → Saft).
-  Kein Käse-/Brot-/Nudel-Icon bei Lucide → Ersatz (Quader "Käse & Butter", Sandwich, Ähre).
-  Neues optionales Feld `icon` (Regeln: `^[a-z0-9-]{1,40}$`). Ohne Foto wird der Vorschlag bzw. das
-  gewählte Icon gespeichert; ältere Artikel zeigen den Vorschlag ohne Schreibzugriff.
+  Neues optionales Feld `icon` (Regeln: `^[a-z0-9-]{1,40}$`): gespeichert wird **nur ein selbst
+  gewähltes** Icon (Raster im Formular oder in den Details); der Vorschlag wird nie gespeichert, sondern
+  immer neu aus dem Namen abgeleitet – bessere Schlagwörter wirken so auch bei bestehenden Artikeln.
+  "Automatisch (aus dem Namen)" entfernt ein gewähltes Icon wieder.
 - **Übungsmodus** (`?uebung=1`, Schalter pro Tab): eigene Datenschicht `uebung-firebase.js` mit
   Beispieldaten (Küche › Kühlschrank › Gemüsefach, Vorratsschrank, Keller › Werkzeugbox, Bad ›
   Spiegelschrank; MHD abgelaufen/heute/bald). Firebase wird im Übungsmodus gar nicht geladen – kein
@@ -64,7 +66,7 @@ Zugriff nur für freigeschaltete Personen.
 - **Einführung** (`tutorial.js`): Hilfe (?) → "Einführung starten", 13 Schritte im Übungsmodus,
   interaktiv (geht weiter, wenn die Aktion gemacht wurde), einmaliger Hinweis für neue Geräte.
 
-**Tests:** siehe [TESTS.md](TESTS.md) – `npm test` 156/156, `npm run test:rules` 80/80 (Emulator,
+**Tests:** siehe [TESTS.md](TESTS.md) – `npm test` 159/159, `npm run test:rules` 80/80 (Emulator,
 portable Java 17), `npm run test:e2e` 26/26 + 9/9, `test:e2e:cutout` ok, `test:e2e:ocr` ok.
 Nicht getestet: echte Firebase-Datenbank (Regeln nur im Emulator), echte Handys, echter QR-Scan.
 

@@ -201,6 +201,13 @@ export function suggestIcon(name) {
   return null;
 }
 
+// Was beim Speichern ins Feld `icon` kommt: nur ein selbst gewähltes, bekanntes Icon. Der Vorschlag
+// aus dem Namen wird nie gespeichert, sondern immer neu abgeleitet (so wirken bessere Schlagwörter
+// auch bei bestehenden Artikeln). → ID oder null (= kein Feld schreiben).
+export function iconToStore(chosen) {
+  return isKnownIcon(chosen) ? chosen : null;
+}
+
 export function iconForItem(item) {
   if (!item) return null;
   if (isKnownIcon(item.icon)) return item.icon;

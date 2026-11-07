@@ -41,7 +41,7 @@ import {
   practiceLinkAction,
 } from "./lib.js";
 import { ITEM_ICONS } from "./item-icons.js";
-import { suggestIcon, isKnownIcon, iconForItem, searchIcons, FALLBACK_ICON } from "./icon-match.js";
+import { suggestIcon, isKnownIcon, iconForItem, iconToStore, searchIcons, FALLBACK_ICON } from "./icon-match.js";
 
 // --- Übungsmodus ---
 // Jede Person übt für sich mit Beispieldaten (uebung-firebase.js, gespeichert in localStorage dieses
@@ -596,7 +596,7 @@ function saveMhd(containerId, itemId, item, mhd) {
   emit("mhd-saved", { containerId, itemId });
 }
 
-// Icon speichern (null = entfernen → wieder Vorschlag aus dem Namen).
+// Selbst gewähltes Icon speichern (null = "Automatisch": Feld entfernen → wieder Vorschlag aus dem Namen).
 function saveIcon(containerId, itemId, item, iconId) {
   if (blockedByLock()) return;
   const data = { icon: iconId && isKnownIcon(iconId) ? iconId : deleteField(), updatedAt: serverTimestamp() };
@@ -616,7 +616,9 @@ function showIconPicker({ name = "", current = null, onPick }) {
       autocomplete="off" aria-label="Icons durchsuchen" maxlength="40" /></div>
     <div class="icon-grid"></div>
     <div class="photo-actions">
-      <button type="button" data-action="auto" class="secondary">Automatisch</button>
+      <button type="button" data-action="auto" class="neutral">Automatisch (aus dem Namen)</button>
+    </div>
+    <div class="photo-actions">
       <button type="button" data-action="close" class="secondary">Abbrechen</button>
     </div>
   `);
@@ -2452,8 +2454,8 @@ function renderContainer(id) {
     }
     const existing = currentItems.get(itemId);
     const plan = planAddItem(existing, { qty, unit });
-    // Icon nur ohne Foto: selbst gewählt immer, Vorschlag nur bei neuen Artikeln bzw. wenn noch keins da ist.
-    const iconId = photoFile ? null : chosenIcon || (existing && isKnownIcon(existing.icon) ? null : suggestIcon(name));
+    // Nur ein selbst gewähltes Icon wird gespeichert; der Vorschlag wird immer neu aus dem Namen abgeleitet.
+    const iconId = iconToStore(chosenIcon);
     let write;
     let message;
     if (plan.action === "conflict") {
