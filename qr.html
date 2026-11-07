@@ -27,6 +27,9 @@
   .qr-toolbar button { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0 1rem; border-radius: var(--radius-ctrl); border: none; background: var(--ink); color: var(--ink-contrast); font-weight: 650; cursor: pointer; }
   .qr-toolbar button.secondary { background: var(--fill); color: var(--text); }
   .qr-card[hidden] { display: none; }
+  .practice-note { background: var(--fill); border-radius: var(--radius-ctrl); padding: 0.7rem 0.9rem; font-size: 0.9rem; }
+  .practice-note[hidden] { display: none; }
+  .qr-card .practice-tag { display: inline-block; margin-top: 0.2rem; padding: 0 0.4rem; border: 1px solid #000; border-radius: 4px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
   @media print {
     body { background: #fff; padding: 0; }
     header, .muted, .no-print, .qr-card input { display: none !important; }
@@ -46,6 +49,8 @@
   <p class="muted">Jeder Behälter hat einen QR-Code. Hake die an, die du drucken willst, dann ausschneiden und
     aufkleben. Neue Behälter legst du in der App an, danach erscheinen sie hier. Die QR-Codes entstehen direkt
     im Browser, es gehen keine Daten an fremde Dienste.</p>
+  <p class="practice-note no-print" id="practice-note" hidden><strong>Übungs-QR-Codes.</strong> Sie öffnen nur die Übungsbehälter
+    auf diesem Gerät (Übungsmodus) – echte Daten ändern sie nie.</p>
   <div class="qr-toolbar no-print" id="toolbar" hidden>
     <input type="search" id="filter" placeholder="Filtern …" aria-label="Behälter filtern" autocomplete="off" />
     <button type="button" class="secondary" id="sel-all">Alle</button>

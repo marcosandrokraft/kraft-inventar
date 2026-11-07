@@ -10,6 +10,12 @@ const filter = document.getElementById("filter");
 const size = document.getElementById("size");
 const count = document.getElementById("count");
 const printBtn = document.getElementById("print-btn");
+// Aus dem Übungsmodus geöffnet (?uebung=1): Übungs-Codes – sie öffnen nur Übungsbehälter, nie echte.
+const practice = new URLSearchParams(location.search).get("uebung") === "1";
+if (practice) {
+  document.getElementById("practice-note").hidden = false;
+  document.title = "Übungs-QR-Codes";
+}
 
 function qrSvg(text) {
   const qr = window.qrcode(0, "M"); // Typ automatisch, mittlere Fehlerkorrektur
@@ -37,7 +43,7 @@ function setSelected(card, on) {
 // diesem Gerät zuletzt gesehen hat (localStorage, wird beim Abmelden gelöscht).
 function pageQuery() {
   if (new URLSearchParams(location.search).has("c")) return location.search;
-  try { return localStorage.getItem("qrContainers") || ""; } catch { return ""; }
+  try { return localStorage.getItem(practice ? "uebung:qrContainers" : "qrContainers") || ""; } catch { return ""; }
 }
 
 const { entries, selected } = parseQrPage(pageQuery());
@@ -46,7 +52,8 @@ if (!entries.length) {
 } else {
   toolbar.hidden = false;
   for (const { id, name, where } of entries) {
-    const url = containerUrl(location.href, id); // nur die ID: Code bleibt beim Umbenennen/Verschieben gleich
+    // nur die ID: Code bleibt beim Umbenennen/Verschieben gleich
+    const url = containerUrl(location.href, id, undefined, { practice });
     const card = document.createElement("label");
     card.className = "qr-card";
     card.dataset.id = id;
@@ -61,6 +68,12 @@ if (!entries.length) {
     label.className = "label";
     label.textContent = name;
     card.append(box, svg, label);
+    if (practice) {
+      const tag = document.createElement("div");
+      tag.className = "practice-tag";
+      tag.textContent = "Übung";
+      card.append(tag);
+    }
     if (where) {
       const w = document.createElement("div");
       w.className = "where";
