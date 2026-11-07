@@ -71,7 +71,7 @@ const ITEMS = {
     { id: "glühbirne", name: "Glühbirne", qty: 2, unit: "Stk" },
   ],
   spiegelschrank: [
-    { id: "pflaster", name: "Pflaster", qty: 1, unit: "Packung", icon: "package" },
+    { id: "pflaster", name: "Pflaster", qty: 1, unit: "Packung" },
     { id: "kopfwehtabletten", name: "Kopfwehtabletten", qty: 20, unit: "Stk", icon: "pill" },
   ],
 };

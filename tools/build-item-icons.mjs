@@ -1,8 +1,12 @@
-// Erzeugt item-icons.js aus einem entpackten lucide-static-Paket.
+// Erzeugt item-icons.js aus entpackten Paketen von lucide-static (Hauptquelle, ISC) und
+// @tabler/icons (nur einzelne Icons, die Lucide nicht hat – MIT, gleicher Strichstil).
 //
-//   npm pack lucide-static@<version>      (in einem leeren Temp-Ordner)
-//   tar xzf lucide-static-<version>.tgz    (ergibt den Ordner "package")
-//   node tools/build-item-icons.mjs <pfad-zum-ordner-package>
+//   npm pack lucide-static@<version>; npm pack @tabler/icons@<version>   (in leeren Temp-Ordnern)
+//   tar xzf <paket>.tgz                    (ergibt jeweils den Ordner "package")
+//   node tools/build-item-icons.mjs <lucide-package> <tabler-package>
+//
+// Tabler-Icons beginnen mit einem unsichtbaren Rahmen <path stroke="none" d="M0 0h24v24H0z" fill="none"/>;
+// genau dieser wird verworfen, danach gilt dieselbe strenge Prüfung wie bei Lucide.
 //
 // Übernommen wird nur die Geometrie (path/circle/rect/line/polyline/polygon/ellipse mit
 // ihren Geometrie-Attributen). Alles andere (Kommentare, class, stroke, <g>, …) wird
@@ -12,7 +16,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Reihenfolge = Reihenfolge im Auswahl-Raster. [Lucide-ID, deutsche Bezeichnung, Gruppe]
+// Reihenfolge = Reihenfolge im Auswahl-Raster. [ID, deutsche Bezeichnung, Gruppe, Quelle?]
+// Quelle fehlt = Lucide; "tabler" = icons/outline/<id>.svg aus @tabler/icons.
 const GROUPS = [
   "Milch & Eier",
   "Fleisch & Fisch",
@@ -29,7 +34,8 @@ const GROUPS = [
 
 const ICONS = [
   ["milk", "Milch", "Milch & Eier"],
-  ["cuboid", "Käse & Butter", "Milch & Eier"],
+  ["cheese", "Käse", "Milch & Eier", "tabler"],
+  ["cuboid", "Butter & Tofu", "Milch & Eier"],
   ["egg", "Eier", "Milch & Eier"],
 
   ["beef", "Fleisch", "Fleisch & Fisch"],
@@ -52,9 +58,12 @@ const ICONS = [
   ["bean", "Bohnen & Linsen", "Obst & Gemüse"],
   ["nut", "Nüsse", "Obst & Gemüse"],
 
-  ["sandwich", "Brot", "Brot & Getreide"],
+  ["bread", "Brot", "Brot & Getreide", "tabler"],
+  ["baguette", "Baguette", "Brot & Getreide", "tabler"],
+  ["sandwich", "Sandwich", "Brot & Getreide"],
   ["croissant", "Gipfeli & Gebäck", "Brot & Getreide"],
-  ["wheat", "Mehl, Reis & Teigwaren", "Brot & Getreide"],
+  ["bowl-chopsticks", "Nudeln & Teigwaren", "Brot & Getreide", "tabler"],
+  ["wheat", "Mehl, Reis & Getreide", "Brot & Getreide"],
 
   ["soup", "Suppe & Bouillon", "Vorrat & Kochen"],
   ["cooking-pot", "Gewürze, Öl & Zutaten", "Vorrat & Kochen"],
@@ -136,8 +145,14 @@ const GEOMETRY = {
 };
 const SAFE_VALUE = /^[0-9A-Za-z .,\-]*$/;
 
-function extractGeometry(svgText, id) {
-  const text = svgText.replace(/<!--[\s\S]*?-->/g, "");
+const TABLER_FRAME = /<path stroke="none" d="M0 0h24v24H0z" fill="none"\s*\/>/;
+
+function extractGeometry(svgText, id, source) {
+  let text = svgText.replace(/<!--[\s\S]*?-->/g, "");
+  if (source === "tabler") {
+    if (!TABLER_FRAME.test(text)) throw new Error(`${id}: Tabler-Rahmen nicht gefunden`);
+    text = text.replace(TABLER_FRAME, "");
+  }
   const open = text.match(/<svg\b[^>]*>/);
   const close = text.lastIndexOf("</svg>");
   if (!open || close < 0) throw new Error(`${id}: kein <svg> gefunden`);
@@ -167,31 +182,42 @@ function extractGeometry(svgText, id) {
   return out.join("");
 }
 
-const pkgDir = process.argv[2];
-if (!pkgDir) {
-  console.error("Aufruf: node tools/build-item-icons.mjs <pfad-zum-entpackten-lucide-static-package>");
+const [pkgDir, tablerDir] = process.argv.slice(2);
+if (!pkgDir || !tablerDir) {
+  console.error("Aufruf: node tools/build-item-icons.mjs <lucide-static-package> <tabler-icons-package>");
   process.exit(1);
 }
-const pkg = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
-if (pkg.name !== "lucide-static") throw new Error(`Falsches Paket: ${pkg.name}`);
-const version = String(pkg.version);
-if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`Unerwartete Version: ${version}`);
+function packageVersion(dir, name) {
+  const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+  if (pkg.name !== name) throw new Error(`Falsches Paket: ${pkg.name} (erwartet ${name})`);
+  const v = String(pkg.version);
+  if (!/^\d+\.\d+\.\d+$/.test(v)) throw new Error(`Unerwartete Version: ${v}`);
+  return v;
+}
+const version = packageVersion(pkgDir, "lucide-static");
+const tablerVersion = packageVersion(tablerDir, "@tabler/icons");
 
 const seen = new Set();
 const lines = [];
-for (const [id, label, group] of ICONS) {
+for (const [id, label, group, source] of ICONS) {
   if (!/^[a-z0-9-]{1,40}$/.test(id)) throw new Error(`Ungültige ID: ${id}`);
   if (seen.has(id)) throw new Error(`Doppelte ID: ${id}`);
   if (!GROUPS.includes(group)) throw new Error(`${id}: unbekannte Gruppe ${group}`);
   seen.add(id);
-  const paths = extractGeometry(readFileSync(join(pkgDir, "icons", `${id}.svg`), "utf8"), id);
+  if (source && source !== "tabler") throw new Error(`${id}: unbekannte Quelle ${source}`);
+  const file = source === "tabler" ? join(tablerDir, "icons", "outline", `${id}.svg`) : join(pkgDir, "icons", `${id}.svg`);
+  const paths = extractGeometry(readFileSync(file, "utf8"), id, source);
   lines.push(`  ${JSON.stringify(id)}: { label: ${JSON.stringify(label)}, group: ${JSON.stringify(group)}, paths: '${paths}' },`);
 }
 
-const out = `// Erzeugt von tools/build-item-icons.mjs aus lucide-static@${version} – Lucide, ISC-Lizenz, siehe vendor/lucide/LICENSE. Nicht von Hand ändern.
+const tablerIds = ICONS.filter((i) => i[3] === "tabler").map((i) => i[0]);
+const out = `// Erzeugt von tools/build-item-icons.mjs aus lucide-static@${version} (Lucide, ISC-Lizenz, siehe vendor/lucide/LICENSE)
+// und für ${tablerIds.join(", ")} aus @tabler/icons@${tablerVersion} (MIT-Lizenz, siehe vendor/tabler/LICENSE). Nicht von Hand ändern.
 // Jedes Icon: viewBox 0 0 24 24, Strich (stroke) statt Füllung; paths enthält nur Geometrie-Elemente.
 
 export const LUCIDE_VERSION = ${JSON.stringify(version)};
+export const TABLER_VERSION = ${JSON.stringify(tablerVersion)};
+export const TABLER_ICON_IDS = ${JSON.stringify(tablerIds)};
 
 export const ICON_GROUPS = ${JSON.stringify(GROUPS)};
 
@@ -202,4 +228,4 @@ ${lines.join("\n")}
 
 const target = resolve(dirname(fileURLToPath(import.meta.url)), "..", "item-icons.js");
 writeFileSync(target, out, "utf8");
-console.log(`${ICONS.length} Icons aus lucide-static@${version} nach ${target} geschrieben.`);
+console.log(`${ICONS.length} Icons (lucide-static@${version}, davon ${tablerIds.length} aus @tabler/icons@${tablerVersion}) nach ${target} geschrieben.`);

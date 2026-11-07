@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { ITEM_ICONS, ICON_GROUPS, LUCIDE_VERSION } from "../../item-icons.js";
+import { ITEM_ICONS, ICON_GROUPS, LUCIDE_VERSION, TABLER_VERSION, TABLER_ICON_IDS } from "../../item-icons.js";
 import {
   suggestIcon,
   isKnownIcon,
@@ -22,20 +22,40 @@ const EXPECTED = {
   "Ei": "egg",
   "Freiland-Eier": "egg",
   "Bio Eier 6 Stk": "egg",
-  "Gruyère": "cuboid",
-  "Bergkäse": "cuboid",
-  "Emmentaler": "cuboid",
+  // Tabler-Icons (Käse, Brot, Baguette, Nudeln)
+  "Raclettekäse": "cheese",
+  "Frischkäse": "cheese",
+  "Mozzarella": "cheese",
+  "Margarine": "cuboid",
+  "Tofu": "cuboid",
+  "Weggli": "bread",
+  "Toastbrot": "bread",
+  "Knäckebrot": "bread",
+  "Baguette": "baguette",
+  "Laugenbrezel": "baguette",
+  "Club Sandwich": "sandwich",
+  "Wraps": "sandwich",
+  "Hörnli": "bowl-chopsticks",
+  "Älplermagronen": "bowl-chopsticks",
+  "Ramen": "bowl-chopsticks",
+  "Eiernudeln": "bowl-chopsticks",
+  "Paniermehl": "wheat",
+  "Risotto": "wheat",
+  "Fleischkäse": "beef",
+  "Gruyère": "cheese",
+  "Bergkäse": "cheese",
+  "Emmentaler": "cheese",
   "Butter": "cuboid",
   "Anke": "cuboid",
   // Brot & Getreide
-  "Vollkornbrot": "sandwich",
-  "Zopf": "sandwich",
+  "Vollkornbrot": "bread",
+  "Zopf": "bread",
   "Gipfeli": "croissant",
   "Croissant": "croissant",
-  "Spaghetti": "wheat",
-  "Penne": "wheat",
-  "Nudeln": "wheat",
-  "Teigwaren": "wheat",
+  "Spaghetti": "bowl-chopsticks",
+  "Penne": "bowl-chopsticks",
+  "Nudeln": "bowl-chopsticks",
+  "Teigwaren": "bowl-chopsticks",
   "Reis": "wheat",
   "Milchreis": "wheat",
   "Mehl": "wheat",
@@ -145,6 +165,16 @@ describe("item-icons.js", () => {
     assert.equal(new Set(ICON_GROUPS).size, ICON_GROUPS.length);
   });
 
+  it("Tabler-Icons (Käse, Brot, Baguette, Nudeln): Version, vorhanden, ohne unsichtbaren Rahmen", () => {
+    assert.equal(TABLER_VERSION, "3.24.0");
+    assert.deepEqual([...TABLER_ICON_IDS].sort(), ["baguette", "bowl-chopsticks", "bread", "cheese"]);
+    for (const id of TABLER_ICON_IDS) {
+      assert.ok(ITEM_ICONS[id], id);
+      assert.ok(!ITEM_ICONS[id].paths.includes("M0 0h24v24H0z"), `${id}: Tabler-Rahmen übernommen`);
+      assert.ok(!/stroke|fill/.test(ITEM_ICONS[id].paths), `${id}: Stil-Attribute übernommen`);
+    }
+  });
+
   it("enthält die Pflicht-IDs", () => {
     for (const id of [
       "milk", "egg", "carrot", "apple", "salad", "leafy-green", "wheat", "coffee", "cookie", "bean", "soup", "wine",
@@ -245,7 +275,7 @@ describe("isKnownIcon / iconForItem / FALLBACK_ICON", () => {
   });
 
   it("ohne Icon: Vorschlag aus dem Namen, sonst null", () => {
-    assert.equal(iconForItem({ name: "Bergkäse" }), "cuboid");
+    assert.equal(iconForItem({ name: "Bergkäse" }), "cheese");
     assert.equal(iconForItem({ name: "Xyzzy" }), null);
     assert.equal(iconForItem({}), null);
     assert.equal(iconForItem(null), null);
@@ -260,7 +290,7 @@ describe("searchIcons", () => {
   });
 
   it("'kä' findet das Käse-Icon", () => {
-    assert.ok(searchIcons("kä").includes("cuboid"));
+    assert.ok(searchIcons("kä").includes("cheese"));
   });
 
   it("'werkzeug' findet Werkzeug-Icons, Vorschlag zuerst", () => {
@@ -270,7 +300,8 @@ describe("searchIcons", () => {
   });
 
   it("Vorschlag für den Text steht vorne", () => {
-    assert.equal(searchIcons("Bergkäse")[0], "cuboid");
+    assert.equal(searchIcons("Bergkäse")[0], "cheese");
+    assert.equal(searchIcons("Spaghetti")[0], "bowl-chopsticks");
     assert.equal(searchIcons("Milch")[0], "milk");
   });
 

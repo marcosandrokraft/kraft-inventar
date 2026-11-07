@@ -9,13 +9,14 @@ Herkunft
   Lizenz:     ISC (Lucide), einige ursprünglich aus Feather (MIT) – vollständiger Text in LICENSE
 
 Was übernommen wurde
-  Nur die Geometrie (path/circle/rect/line/polyline/polygon/ellipse) von 85 Icons,
+  Nur die Geometrie (path/circle/rect/line/polyline/polygon/ellipse) von 85 Icons
+  (dazu 4 aus Tabler, siehe ../tabler/README.txt),
   eingebettet in ../../item-icons.js (Objekt ITEM_ICONS; dort auch deutsche
   Bezeichnung und Gruppe). Keine Schriften, kein Sprite, kein JavaScript aus dem Paket.
 
-  IDs: milk, cuboid (Käse & Butter), egg, beef, ham, bacon, drumstick, fish, shrimp,
+  IDs: milk, cuboid (Butter & Tofu), egg, beef, ham, bacon, drumstick, fish, shrimp,
   apple, banana, cherry, citrus, grape, avocado, carrot, broccoli, salad, leafy-green,
-  bean, nut, sandwich (Brot), croissant, wheat, soup, cooking-pot, can, pizza,
+  bean, nut, sandwich, croissant, wheat, soup, cooking-pot, can, pizza,
   snowflake, utensils, cookie, cake, cake-slice, candy, lollipop, candy-cane,
   ice-cream-cone, popcorn, coffee, cup-soda, glass-water, carton (Saft), beer, wine,
   spray-can, soap-dispenser-droplet, washing-machine, broom, toilet, toothbrush,
@@ -31,7 +32,7 @@ Neu erzeugen (z.B. andere Version oder andere Icon-Auswahl)
        npm pack lucide-static@<version>
        tar xzf lucide-static-<version>.tgz
   3. Im Repo:
-       node tools/build-item-icons.mjs <temp-ordner>/package
+       node tools/build-item-icons.mjs <temp-ordner>/package <tabler-ordner>/package
      Das Skript liest die Version aus package.json des Pakets und schreibt item-icons.js.
   4. LICENSE aus dem Paket hierher kopieren, Version/Integrity/Datum oben anpassen,
      npm test laufen lassen.
