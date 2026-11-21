@@ -114,7 +114,7 @@ export const TUTORIAL_STEPS = [
   {
     id: "verschieben",
     title: "Verschieben und Fächer",
-    text: "Mit «Auswählen» markierst du mehrere Artikel und verschiebst sie. Unten legst du mit «+ Behälter hier hineinlegen» Fächer oder Boxen an.",
+    text: "Mit «Auswählen» markierst du mehrere Artikel und verschiebst sie – oder legst mit «Ziel» fest, wohin sie beim Umzug gehören. Unten legst du Fächer oder Boxen an.",
     note: "Aus Versehen gelöscht? In der Meldung unten gibt es «Rückgängig».",
     views: ["container"],
     containerIds: null,

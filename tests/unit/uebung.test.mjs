@@ -69,7 +69,8 @@ describe("Übung: Beispieldaten (practiceSeed)", () => {
     const all = new Map([...containers].map(([id, c]) => [id, { name: c.name, type: c.type, parent: c.parent }]));
     for (const [id, c] of containers) {
       assert.ok(isValidId(id), id);
-      assert.ok(Object.keys(c).every((k) => ["name", "createdAt", "type", "parent"].includes(k)), id);
+      assert.ok(Object.keys(c).every((k) => ["name", "createdAt", "type", "parent", "target"].includes(k)), id);
+      if (c.target !== undefined) assert.ok(containers.has(c.target) && c.target !== id, `${id}: Ziel ${c.target}`);
       assert.ok(typeof c.name === "string" && c.name.length > 0 && c.name.length <= 100);
       assert.ok(c.type in CONTAINER_TYPES, id);
       assert.equal(typeof c.createdAt.__ts, "number");
@@ -100,7 +101,8 @@ describe("Übung: Beispieldaten (practiceSeed)", () => {
       assert.ok(isValidId(id), id);
       assert.ok(UNITS.includes(data.unit), `${id}: ${data.unit}`);
       assert.ok(Number.isInteger(data.qty) && data.qty >= 1 && data.qty <= MAX_QTY, id);
-      assert.ok(Object.keys(data).every((k) => ["name", "qty", "unit", "mhd", "updatedAt", "icon"].includes(k)), id);
+      assert.ok(Object.keys(data).every((k) => ["name", "qty", "unit", "mhd", "updatedAt", "icon", "target"].includes(k)), id);
+      if ("target" in data) assert.ok(containers.has(data.target) && data.target !== containerId, `${id}: Ziel ${data.target}`);
       assert.equal(typeof data.updatedAt.__ts, "number");
       if ("mhd" in data) assert.ok(isValidIsoDate(data.mhd), `${id}: ${data.mhd}`);
       if ("icon" in data) assert.ok(PRACTICE_ICONS.includes(data.icon), `${id}: ${data.icon}`);

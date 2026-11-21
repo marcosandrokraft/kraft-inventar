@@ -5,6 +5,8 @@
 // Die Behälter-IDs sind FEST (Tutorial und Tests verlassen sich darauf), Artikel-IDs = slugify(name).
 // Alle Daten erfüllen validContainer()/validItem() aus firestore.rules (ausser dem Feld `icon`,
 // das nur die Übung bzw. neuere App-Versionen kennen).
+// Umzug (Paket Ziel): "Kiste 1" gehört in die Küche (das Messerset in die Schublade), "Kiste 2" hat kein
+// Ziel – dort zeigt die App Vorschläge (Pflaster → Spiegelschrank, Zahnbürste → Bad, Hammer → Keller).
 
 import { addToDate } from "./lib.js";
 
@@ -18,13 +20,16 @@ export const PRACTICE_CONTAINER_IDS = [
   "werkzeugbox",
   "bad",
   "spiegelschrank",
+  "schublade",
+  "kiste-1",
+  "kiste-2",
 ];
 
 // Icons, die in den Beispieldaten vorkommen dürfen (gleiche Namen wie in der App).
 export const PRACTICE_ICONS = [
   "milk", "egg", "carrot", "apple", "salad", "leafy-green", "wheat", "coffee", "cookie", "bean",
   "soup", "wine", "hammer", "wrench", "scissors", "battery", "lightbulb", "pill", "spray-can",
-  "package", "beef", "fish", "croissant", "cup-soda",
+  "package", "beef", "fish", "croissant", "cup-soda", "utensils",
 ];
 
 const CONTAINERS = {
@@ -36,6 +41,9 @@ const CONTAINERS = {
   werkzeugbox: { name: "Werkzeugbox", type: "box", parent: "keller" },
   bad: { name: "Bad", type: "raum" },
   spiegelschrank: { name: "Spiegelschrank", type: "schrank", parent: "bad" },
+  schublade: { name: "Schublade oben", type: "fach", parent: "kueche" },
+  "kiste-1": { name: "Kiste 1", type: "box", target: "kueche" },
+  "kiste-2": { name: "Kiste 2", type: "box" },
 };
 
 // mhd: Tage ab heute ({ days }) bzw. Monate ({ months }); fehlt → ohne MHD.
@@ -73,6 +81,19 @@ const ITEMS = {
   spiegelschrank: [
     { id: "pflaster", name: "Pflaster", qty: 1, unit: "Packung" },
     { id: "kopfwehtabletten", name: "Kopfwehtabletten", qty: 20, unit: "Stk", icon: "pill" },
+  ],
+  // Umzugskisten: Kiste 1 → Küche (Teller/Tassen erben das Ziel), Messerset mit eigenem Ziel.
+  "kiste-1": [
+    { id: "teller", name: "Teller", qty: 6, unit: "Stk", icon: "utensils" },
+    { id: "tassen", name: "Tassen", qty: 4, unit: "Stk" },
+    { id: "messerset", name: "Messerset", qty: 1, unit: "Stk", icon: "utensils", target: "schublade" },
+  ],
+  // Kiste 2 ohne Ziel: Vorschläge aus gleichem Namen bzw. Kategorie; Fotoalbum ohne Vorschlag.
+  "kiste-2": [
+    { id: "pflaster", name: "Pflaster", qty: 1, unit: "Packung" },
+    { id: "zahnbürste", name: "Zahnbürste", qty: 2, unit: "Stk" },
+    { id: "hammer", name: "Hammer", qty: 1, unit: "Stk", icon: "hammer" },
+    { id: "fotoalbum", name: "Fotoalbum", qty: 3, unit: "Stk" },
   ],
 };
 
