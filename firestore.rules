@@ -78,13 +78,21 @@ service cloud.firestore {
     // Optional (Runde 2): type = Ebene (Raum/Schrank/Fach/Box), parent = ID des Behälters, in dem
     // dieser liegt. Fehlt parent, ist es ein Behälter auf oberster Ebene (auch ohne Raum möglich).
     // Kreise (A in B, B in A) verhindert die App; hier nur: nicht in sich selbst.
+    // Optional (Paket Ziel): target = ID des Behälters, in den dieser beim Umzug gehört ("Gehört nach …");
+    // nicht der Behälter selbst (Unterbehälter als Ziel verhindert die App).
     function validContainer(d, containerId) {
-      return d.keys().hasOnly(['name', 'createdAt', 'type', 'parent'])
+      return d.keys().hasOnly(['name', 'createdAt', 'type', 'parent', 'target'])
         && validName(d)
         && (!('createdAt' in d) || d.createdAt is timestamp)
         && (!('type' in d) || d.type in ['raum', 'schrank', 'fach', 'box'])
         && (!('parent' in d) || (d.parent is string && d.parent.size() > 0 && d.parent.size() <= 100
-              && d.parent != containerId && !d.parent.matches('.*[/].*')));
+              && d.parent != containerId && !d.parent.matches('.*[/].*')))
+        && (!('target' in d) || (validTargetId(d.target) && d.target != containerId));
+    }
+
+    // Ziel (Paket Ziel): Behälter-ID als String, 1–100 Zeichen, ohne "/".
+    function validTargetId(t) {
+      return t is string && t.size() > 0 && t.size() <= 100 && !t.matches('.*[/].*');
     }
 
     // Fotos: nur JPEG als data-URL (so erzeugt sie die App), max. ~900 KB (Dokumentlimit 1 MiB).
@@ -99,7 +107,7 @@ service cloud.firestore {
     }
 
     function validItem(d) {
-      return d.keys().hasOnly(['name', 'qty', 'unit', 'photo', 'mhd', 'icon', 'updatedAt'])
+      return d.keys().hasOnly(['name', 'qty', 'unit', 'photo', 'mhd', 'icon', 'target', 'updatedAt'])
         && validName(d)
         && d.qty is int && d.qty >= 1 && d.qty <= 100000
         // unit darf fehlen (ältere Artikel; die App zeigt dann "Stk"), sonst nur bekannte Einheiten
@@ -108,6 +116,8 @@ service cloud.firestore {
         && (!('photo' in d) || validPhoto(d.photo))
         // icon (optional): Icon-ID wie "milk" oder "leafy-green"
         && (!('icon' in d) || (d.icon is string && d.icon.matches('^[a-z0-9-]{1,40}$')))
+        // target (optional, Paket Ziel): Behälter, in den der Artikel beim Umzug gehört
+        && (!('target' in d) || validTargetId(d.target))
         && (!('updatedAt' in d) || d.updatedAt is timestamp);
     }
 
