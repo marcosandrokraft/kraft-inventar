@@ -645,3 +645,251 @@ export function signInContinueUrl(href) {
   url.hash = "";
   return url.href;
 }
+
+// --- Umzug: "Gehört nach …" (Paket Ziel) ---
+// Behälter und Artikel können ein optionales Feld `target` haben = ID eines anderen Behälters, in den
+// sie beim Auspacken gehören. Artikel ohne eigenes Ziel erben das Ziel ihres Behälters (bzw. des
+// nächsten übergeordneten Behälters mit Ziel). Liegt etwas schon im Ziel (oder in einem Unterbehälter
+// davon), gilt das Ziel als erreicht und wird nicht mehr angezeigt. Vorschläge werden nur angezeigt,
+// nie gespeichert. Gleiche Form wie validContainer()/validItem() in firestore.rules.
+
+// Gespeicherten Wert prüfen → ID oder undefined (leer, zu lang, mit "/", kein String).
+export function cleanTargetId(value) {
+  return typeof value === "string" && value.length > 0 && value.length <= MAX_NAME && !value.includes("/")
+    ? value
+    : undefined;
+}
+
+// Liegt `locationId` im Ziel `targetId` (gleicher Behälter oder irgendwo darin)?
+export function isTargetReached(locationId, targetId, containers) {
+  if (!locationId || !targetId) return false;
+  return wouldCreateCycle(targetId, locationId, containers);
+}
+
+// Darf Behälter `containerId` das Ziel `targetId` bekommen? → null (ok) | "missing" (gibt es nicht) |
+// "self" (er selbst) | "inside" (eigener Unterbehälter → Kreis) | "reached" (liegt schon dort).
+export function containerTargetError(containerId, targetId, containers) {
+  if (!targetId || !containers.has(targetId)) return "missing";
+  if (targetId === containerId) return "self";
+  if (wouldCreateCycle(containerId, targetId, containers)) return "inside";
+  if (isTargetReached(containers.get(containerId)?.parent, targetId, containers)) return "reached";
+  return null;
+}
+
+// Darf ein Artikel in `containerId` das Ziel `targetId` bekommen? → null | "missing" | "self" (der
+// eigene Behälter) | "reached" (der Behälter liegt schon im Ziel).
+export function itemTargetError(containerId, targetId, containers) {
+  if (!targetId || !containers.has(targetId)) return "missing";
+  if (targetId === containerId) return "self";
+  if (isTargetReached(containerId, targetId, containers)) return "reached";
+  return null;
+}
+
+// Mögliche Ziele mit Pfad (alphabetisch): für einen Behälter (kind "container") alle ausser ihm
+// selbst, seinen Unterbehältern und denen, in denen er schon liegt; für Artikel (kind "item") alle
+// ausser dem eigenen Behälter und denen, in denen dieser liegt.
+export function targetOptions(kind, containerId, containers) {
+  return parentOptions(null, containers).filter((o) => (kind === "container"
+    ? !containerTargetError(containerId, o.id, containers)
+    : !itemTargetError(containerId, o.id, containers)));
+}
+
+// Ziel eines Ortes (Behälter): eigenes oder geerbtes vom nächsten übergeordneten Behälter mit
+// gültigem Ziel. → { id, via } (via = Behälter, an dem das Ziel steht) | null (keins oder erreicht).
+export function containerTarget(locationId, containers) {
+  const chain = containerPath(locationId, containers).reverse(); // Ort, Eltern, …
+  for (const { id } of chain) {
+    const t = cleanTargetId(containers.get(id)?.target);
+    if (!t || !containers.has(t) || wouldCreateCycle(id, t, containers)) continue; // ungültig → weiter oben
+    if (isTargetReached(locationId, t, containers)) return null;
+    return { id: t, via: id };
+  }
+  return null;
+}
+
+// Ziel eines Artikels in `containerId`: eigenes (kind "own") oder geerbtes (kind "inherited", via).
+// Eigenes Ziel erreicht → null (auch wenn der Behälter ein anderes Ziel hätte). Ein eigenes Ziel,
+// das es nicht mehr gibt (gelöscht), zählt nicht.
+export function itemTarget(item, containerId, containers) {
+  const own = cleanTargetId(item?.target);
+  if (own && containers.has(own)) {
+    return isTargetReached(containerId, own, containers) ? null : { id: own, kind: "own" };
+  }
+  const inherited = containerTarget(containerId, containers);
+  return inherited ? { id: inherited.id, kind: "inherited", via: inherited.via } : null;
+}
+
+// Name eines Umzugsbehälters ("Kiste 3", "Umzugskarton Bad").
+const MOVING_WORDS = ["kiste", "karton", "umzug"];
+// Nur am Wortanfang ("Kiste 3", "Umzugskarton"), damit "Werkzeugkiste" oder "Bierkiste" keine
+// Umzugskisten sind.
+function hasMovingName(c) {
+  const parts = normalizeSearch(c?.name).split(/[^a-z0-9]+/);
+  return parts.some((p) => MOVING_WORDS.some((w) => p.startsWith(w)));
+}
+
+// Liegt der Ort in einer Umzugskiste (er selbst oder ein Behälter darüber heisst "…kiste…",
+// "…karton…", "umzug…" oder hat ein Ziel)?
+export function inMovingBox(id, containers) {
+  return containerPath(id, containers).some(({ id: p }) => {
+    const c = containers.get(p);
+    return hasMovingName(c) || !!cleanTargetId(c?.target);
+  });
+}
+
+// Braucht dieser Behälter Vorschläge? Nur wenn er kein (geerbtes) Ziel hat und entweder eine
+// Umzugskiste ist (Name) oder schon Artikel mit eigenem Ziel enthält. Sonst bleibt alles wie bisher
+// (und es werden keine zusätzlichen Daten geladen).
+export function needsSuggestions(containerId, containers, items = []) {
+  if (!containers.has(containerId) || containerTarget(containerId, containers)) return false;
+  if (inMovingBox(containerId, containers)) return true;
+  return items.some((it) => {
+    const t = cleanTargetId(it?.target);
+    return !!t && containers.has(t) && !isTargetReached(containerId, t, containers);
+  });
+}
+
+// Ein "fester Ort" für Vorschläge: kein Box-Typ und nicht in einer Umzugskiste.
+function isSettled(id, containers) {
+  const c = containers.get(id);
+  return !!c && c.type !== "box" && !inMovingBox(id, containers);
+}
+
+export function nameKey(name) {
+  return normalizeSearch(name).replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+}
+// "Tasse"/"Tassen", "Teller"/"Tellers", "Glas"/"Gläser" (ä → a): einfacher Stamm.
+function nameStem(key) {
+  return key.replace(/(en|er|e|n|s)$/, "");
+}
+export function similarNames(a, b) {
+  return similarKeys(nameKey(a), nameKey(b));
+}
+// Wie similarNames, aber mit schon berechneten nameKey()-Werten (schneller bei vielen Artikeln).
+function similarKeys(ka, kb) {
+  if (!ka || !kb) return false;
+  if (ka === kb) return true;
+  const sa = nameStem(ka);
+  const sb = nameStem(kb);
+  // gleicher Stamm, oder ein Name ist der Stamm des anderen ("Glas" / "Gläser" → "glas")
+  return [[sa, sb], [ka, sb], [sa, kb]].some(([x, y]) => x.length >= 3 && x === y);
+}
+
+// Kategorien für Vorschlag (b): Icon-ID oder Icon-Gruppe (item-icons.js) → Wörter im Behälternamen.
+// Icon-Regeln gehen vor Gruppen-Regeln; leere Wortliste = bewusst kein Vorschlag. Wörter sind
+// normalisiert (wie normalizeSearch: ü → u usw.).
+const FOOD_GROUPS = ["Milch & Eier", "Fleisch & Fisch", "Obst & Gemüse", "Brot & Getreide", "Vorrat & Kochen", "Süsses & Snacks", "Getränke"];
+export const TARGET_CATEGORIES = [
+  { icons: ["soap-dispenser-droplet", "toothbrush", "tube-lotion", "toilet"], words: ["bad", "badezimmer", "dusche", "wc", "toilette", "lavabo"] },
+  { icons: ["spray-can", "washing-machine", "broom", "trash"], words: ["putz", "wasch", "reduit", "abstell", "hauswirtschaft"] },
+  { icons: ["shirt"], words: ["kleider", "garderobe", "schlafzimmer"] },
+  { icons: ["lightbulb", "battery", "flame", "smartphone", "headphones"], words: [] },
+  { groups: FOOD_GROUPS, words: ["küche", "kueche", "vorrat", "speisekammer", "kühlschrank", "kuehlschrank"] },
+  { groups: ["Gesundheit"], words: ["apotheke", "medizin", "bad", "badezimmer"] },
+  { groups: ["Werkzeug & Technik"], words: ["werkzeug", "werkstatt", "bastel", "keller", "garage"] },
+];
+
+function categoryWords(iconId, group) {
+  const byIcon = iconId && TARGET_CATEGORIES.find((c) => c.icons?.includes(iconId));
+  if (byIcon) return byIcon.words;
+  const byGroup = group && TARGET_CATEGORIES.find((c) => c.groups?.includes(group));
+  return byGroup ? byGroup.words : [];
+}
+
+// Passt ein Behältername zu einem der Wörter? Kurze Wörter (bis 4 Zeichen, z.B. "bad", "wc") nur am
+// Wortanfang, längere auch mitten im Wort ("Küchenschrank", "Hauptvorrat"). Umlaute bleiben erhalten,
+// damit "Küche" nicht in "Kuchenform" passt.
+function nameMatches(name, words) {
+  const n = String(name ?? "").toLowerCase().normalize("NFC").replace(/ß/g, "ss");
+  const parts = n.split(/[^a-z0-9äöü]+/).filter(Boolean);
+  return words.some((w) => (w.length <= 4 ? parts.some((p) => p.startsWith(w)) : n.includes(w)));
+}
+
+// Von mehreren Treffern nur die obersten behalten (Küche statt Küche › Kühlschrank).
+function topmost(ids, containers) {
+  const set = new Set(ids);
+  return ids.filter((id) => !containerPath(id, containers).slice(0, -1).some((p) => set.has(p.id)));
+}
+
+// Vorschlag für einen Artikel ohne (geerbtes) Ziel. Reine Logik, schreibt nichts.
+// { name, containerId, iconId, group }: Artikelname, aktueller Behälter, Icon (gespeichert oder aus dem
+// Namen) und dessen Gruppe. `allItems`: [{ name, containerId, key? }] aller Artikel (null = nicht
+// geladen, dann nur Vorschlag b); `key` = nameKey(name), vorberechnet spart Zeit bei vielen Artikeln.
+// (a) Gleicher/ähnlicher Name liegt schon an einem festen Ort (keine Box, keine Umzugskiste, nicht hier
+//     drin) → dieser Behälter, wenn eindeutig (zuerst gleiche Namen, dann ähnliche).
+// (b) Kategorie (Icon/Gruppe) → Behälter, dessen Name passt (keine Box, keine Umzugskiste), nur der
+//     oberste und nur wenn eindeutig.
+// → { id, reason: "name" | "category" } | null. Nie der aktuelle Behälter oder einer, in dem er liegt.
+export function suggestTarget({ name, containerId, iconId = null, group = null }, containers, allItems = null) {
+  if (!containers.has(containerId)) return null;
+  const memo = new Map();
+  const usable = (id) => {
+    if (!memo.has(id)) {
+      memo.set(id, id !== containerId && containers.has(id) && isSettled(id, containers)
+        && !isTargetReached(containerId, id, containers) // liegt schon dort
+        && !isTargetReached(id, containerId, containers)); // liegt hier drin
+    }
+    return memo.get(id);
+  };
+  const key = nameKey(name);
+  if (Array.isArray(allItems) && key) {
+    const exact = new Set();
+    const similar = new Set();
+    for (const it of allItems) {
+      if (!it || typeof it.containerId !== "string") continue;
+      const k = typeof it.key === "string" ? it.key : nameKey(it.name);
+      const same = k === key;
+      if (!same && !similarKeys(k, key)) continue;
+      if (!usable(it.containerId)) continue;
+      (same ? exact : similar).add(it.containerId);
+    }
+    if (exact.size === 1) return { id: [...exact][0], reason: "name" };
+    if (!exact.size && similar.size === 1) return { id: [...similar][0], reason: "name" };
+  }
+  const words = categoryWords(iconId, group);
+  if (!words.length) return null;
+  const hits = [...containers.keys()].filter((id) => {
+    const c = containers.get(id);
+    return c.type !== "box" && !inMovingBox(id, containers) && nameMatches(c.name, words);
+  });
+  const top = topmost(hits, containers);
+  if (top.length !== 1 || !usable(top[0])) return null;
+  return { id: top[0], reason: "category" };
+}
+
+// Gemeinsames Ziel mehrerer Artikel (für den Verschieben-Dialog): alle haben dasselbe → { id, kind },
+// sonst null. kind "suggest", sobald einer nur einen Vorschlag hat.
+export function commonTarget(infos) {
+  if (!infos.length || infos.some((i) => !i?.id)) return null;
+  const id = infos[0].id;
+  if (!infos.every((i) => i.id === id)) return null;
+  return { id, kind: infos.some((i) => i.kind === "suggest") ? "suggest" : infos[0].kind };
+}
+
+// Pfad gekürzt auf die letzten `max` Teile: "Haus › Küche › Schublade" → "Küche › Schublade".
+export function shortPath(id, containers, max = 2) {
+  const path = containerPath(id, containers);
+  return formatPath(path.slice(-max));
+}
+
+// "Auspacken"-Ansicht: Artikel nach Ziel gruppieren. rows = [{ id, info }] mit info = null |
+// { id, kind: "own" | "inherited" | "suggest" }. Feste Ziele zuerst (nach `label(id)`), dann
+// Vorschläge, zuletzt "ohne Ziel". → [{ key, targetId, suggest, rows }]
+export function groupByTarget(rows, label = (id) => id) {
+  const groups = new Map();
+  for (const row of rows) {
+    const info = row.info;
+    const suggest = info?.kind === "suggest";
+    const key = info?.id ? `${suggest ? "s" : "t"}:${info.id}` : "none";
+    if (!groups.has(key)) groups.set(key, { key, targetId: info?.id || null, suggest, rows: [] });
+    groups.get(key).rows.push(row);
+  }
+  const rank = (g) => (!g.targetId ? 2 : g.suggest ? 1 : 0);
+  return [...groups.values()].sort((a, b) => rank(a) - rank(b)
+    || String(label(a.targetId) ?? "").localeCompare(String(label(b.targetId) ?? ""), "de"));
+}
+
+// Lohnt sich die "Auspacken"-Ansicht? Mind. ein Ziel/Vorschlag und mind. zwei verschiedene Gruppen.
+export function canGroupByTarget(rows) {
+  return rows.some((r) => r.info?.id) && groupByTarget(rows).length >= 2;
+}
