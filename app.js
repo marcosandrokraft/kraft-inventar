@@ -46,6 +46,20 @@ import {
   waitText,
   isPlausibleEmail,
   signInContinueUrl,
+  cleanTargetId,
+  isTargetReached,
+  containerTargetError,
+  itemTargetError,
+  targetOptions,
+  containerTarget,
+  itemTarget,
+  needsSuggestions,
+  suggestTarget,
+  commonTarget,
+  shortPath,
+  groupByTarget,
+  canGroupByTarget,
+  nameKey,
 } from "./lib.js";
 import { ITEM_ICONS } from "./item-icons.js";
 import { suggestIcon, isKnownIcon, iconForItem, iconToStore, searchIcons, FALLBACK_ICON } from "./icon-match.js";
@@ -168,6 +182,9 @@ const PHOTO_BACKGROUND = "#e8e8e8";
 
 // Ab so vielen Artikeln erscheint im Behälter ein Filterfeld.
 const FILTER_THRESHOLD = 8;
+
+// "Nach Ziel ordnen" (Auspacken-Ansicht) – gemerkt pro Gerät, Standard aus.
+const GROUP_BY_TARGET_KEY = "groupByTarget";
 
 const app = initializeApp(config.firebaseConfig);
 
@@ -491,6 +508,7 @@ function watchContainers() {
         name: data.name || d.id,
         type: CONTAINER_TYPES[data.type] ? data.type : undefined,
         parent: typeof data.parent === "string" && data.parent ? data.parent : undefined,
+        target: cleanTargetId(data.target),
       });
     });
     containersLoaded = true;
@@ -574,6 +592,7 @@ const ICON_PATHS = {
   lock: '<rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
   help: '<circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.6a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2-2.4 3.6"/><path d="M12 17.2v.01"/>',
   practice: '<path d="m2.5 9 9.5-4.5L21.5 9 12 13.5z"/><path d="M6.5 11.2v4.3c1.6 1.4 3.5 2 5.5 2s3.9-.6 5.5-2v-4.3M21.5 9v5"/>',
+  flag: '<path d="M5.5 21V4"/><path d="M5.5 4.5h11.8a.6.6 0 0 1 .5.9L15.6 9l2.2 3.6a.6.6 0 0 1-.5.9H5.5"/>',
 };
 function svgIcon(paths, cls) {
   return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${paths}</svg>`;
@@ -815,7 +834,206 @@ function showMhdSuggestions(containerId, itemId, item, dates, source, rawText) {
   });
 }
 
-// Detailansicht eines Artikels: Foto gross, Foto ändern, MHD, Verschieben, Entfernen.
+// --- Umzug: "Gehört nach …" (Ziel) ---
+// Behälter und Artikel können ein Ziel haben (Feld `target` = Behälter-ID). Artikel ohne eigenes Ziel
+// erben das ihres Behälters. Ist das Ziel erreicht (liegt dort oder darin), wird es nicht angezeigt und
+// beim Verschieben ans Ziel entfernt. Vorschläge (lib.js → suggestTarget) werden nur angezeigt, nie
+// gespeichert. Logik und Tests: lib.js, tests/unit/ziel.test.mjs.
+
+function nameOf(id) {
+  return allContainers.get(id)?.name || id;
+}
+function targetLabel(id) {
+  return shortPath(id, allContainers);
+}
+
+function sessionGet(key) {
+  try { return sessionStorage.getItem(storageKey(key)); } catch { return null; }
+}
+function sessionSet(key, value) {
+  try {
+    if (value === null) sessionStorage.removeItem(storageKey(key));
+    else sessionStorage.setItem(storageKey(key), value);
+  } catch {}
+}
+
+// Artikel-Index für Vorschlag (a): Name + Behälter aller Artikel. Wird nur geladen, wenn ein Behälter
+// Vorschläge braucht (needsSuggestions), mit derselben Abfrage wie die Suche (loadAllItems), und für
+// 10 Minuten in sessionStorage gemerkt – so kostet das Durchgehen mehrerer Kisten nur einmal Lesezugriffe.
+const ITEM_INDEX_KEY = "itemIndex";
+const ITEM_INDEX_TTL = 10 * 60 * 1000;
+const ITEM_INDEX_MAX = 5000;
+let itemIndex = null; // [{ name, containerId }] oder null (nicht geladen bzw. Laden fehlgeschlagen)
+let itemIndexPromise = null;
+let itemIndexDone = false;
+
+function readItemIndexCache() {
+  try {
+    const d = JSON.parse(sessionGet(ITEM_INDEX_KEY) || "null");
+    const age = Date.now() - Number(d?.t);
+    if (!d || !Array.isArray(d.items) || !(age >= 0 && age < ITEM_INDEX_TTL)) return null;
+    return d.items.filter((it) => it && typeof it.name === "string" && typeof it.containerId === "string").slice(0, ITEM_INDEX_MAX);
+  } catch {
+    return null;
+  }
+}
+
+function ensureItemIndex() {
+  itemIndexPromise ||= (async () => {
+    const cached = readItemIndexCache();
+    if (cached) {
+      itemIndex = cached;
+    } else {
+      try {
+        const all = await loadAllItems();
+        itemIndex = all.slice(0, ITEM_INDEX_MAX)
+          .map((it) => ({ name: String(it.name ?? "").slice(0, MAX_NAME), containerId: it.containerId }));
+        sessionSet(ITEM_INDEX_KEY, JSON.stringify({ t: Date.now(), items: itemIndex }));
+      } catch (err) {
+        console.warn("Vorschläge ohne Artikelliste:", err); // dann nur Vorschläge aus der Kategorie
+      }
+    }
+    // Schlüssel für den Namensvergleich einmal vorberechnen (nicht bei jedem Neuaufbau der Liste).
+    if (itemIndex) itemIndex = itemIndex.map((it) => ({ name: it.name, containerId: it.containerId, key: nameKey(it.name) }));
+    itemIndexDone = true;
+  })();
+  return itemIndexPromise;
+}
+
+// Nach dem Verschieben: gemerkten Index nachführen (sonst zeigen Vorschläge noch den alten Ort).
+function patchItemIndex(fromId, toId, names) {
+  const list = itemIndex || readItemIndexCache();
+  if (!list) return;
+  const moved = new Set(names);
+  for (const it of list) if (it.containerId === fromId && moved.has(it.name)) it.containerId = toId;
+  let t = Date.now();
+  try { t = Number(JSON.parse(sessionGet(ITEM_INDEX_KEY)).t) || t; } catch {}
+  sessionSet(ITEM_INDEX_KEY, JSON.stringify({ t, items: list.map((it) => ({ name: it.name, containerId: it.containerId })) }));
+}
+
+// Vorschläge nur im gerade angezeigten Behälter und nur, wenn er sie braucht (setzt renderContainer).
+const suggestState = { containerId: null, active: false };
+
+// Ziel (eigenes/geerbtes) oder – wo aktiv – Vorschlag eines Artikels.
+// → { id, kind: "own" | "inherited" | "suggest", via?, reason? } | null
+function targetInfo(containerId, item) {
+  if (!containersLoaded) return null;
+  const t = itemTarget(item, containerId, allContainers);
+  if (t) return t;
+  if (!suggestState.active || suggestState.containerId !== containerId) return null;
+  const iconId = iconForItem(item);
+  const s = suggestTarget(
+    { name: item.name, containerId, iconId, group: iconId ? ITEM_ICONS[iconId]?.group : null },
+    allContainers,
+    itemIndex
+  );
+  return s ? { id: s.id, kind: "suggest", reason: s.reason } : null;
+}
+
+// "→ Küche › Schublade" bzw. "Vorschlag: → Bad" als kleine Zeile. Geerbte Ziele nur mit `inherited`
+// (in der Artikelliste steht das geerbte Ziel schon im Kopf des Behälters).
+function targetLine(info, { inherited = false, cls = "item-target" } = {}) {
+  if (!info || (info.kind === "inherited" && !inherited)) return "";
+  const to = `<span aria-hidden="true">→</span><span class="sr-only">gehört nach</span> ${escapeHtml(targetLabel(info.id))}`;
+  if (info.kind === "suggest") return `<small class="${cls} is-suggestion">Vorschlag: ${to}</small>`;
+  const via = info.kind === "inherited" ? ` <span class="target-via">· über ${escapeHtml(nameOf(info.via))}</span>` : "";
+  return `<small class="${cls}">${to}${via}</small>`;
+}
+
+const TARGET_ERRORS = {
+  missing: "Diesen Behälter gibt es nicht (mehr).",
+  self: "Das ist der eigene Behälter – bitte ein anderes Ziel wählen.",
+  inside: "Ein Behälter kann nicht in einen eigenen Unterbehälter gehören.",
+  reached: "Liegt schon dort – kein Ziel nötig.",
+};
+
+// Ziel für einen oder mehrere Artikel setzen (targetId) bzw. entfernen (""): ein Batch, mit Rückgängig.
+function saveItemTargets(containerId, entries, targetId) {
+  if (blockedByLock()) return false;
+  if (targetId) {
+    const err = itemTargetError(containerId, targetId, allContainers);
+    if (err) {
+      toast(TARGET_ERRORS[err], 4000);
+      return false;
+    }
+  }
+  const batch = writeBatch(db);
+  const undo = writeBatch(db);
+  for (const { itemId, item } of entries) {
+    const ref = itemRef(containerId, itemId);
+    const before = cleanTargetId(item.target);
+    batch.update(ref, { target: targetId || deleteField(), updatedAt: serverTimestamp() });
+    undo.update(ref, { target: before || deleteField(), updatedAt: serverTimestamp() });
+    item.target = targetId || undefined;
+  }
+  background(batch.commit().then(() => emit("target-saved", { containerId })), "Ziel speichern");
+  const label = entries.length === 1 ? `"${entries[0].item.name}"` : `${entries.length} Artikel`;
+  toast(targetId ? `${label} gehört nach ${targetLabel(targetId)}` : `${label}: Ziel entfernt`, {
+    ms: 6000,
+    action: { label: "Rückgängig", fn: () => { background(undo.commit(), "Rückgängig"); toast("Ziel zurückgesetzt"); } },
+  });
+  return true;
+}
+
+// "Gehört nach …" für einen oder mehrere Artikel. Auswahl wie im Verschieben-Dialog (mit Pfad).
+// Vorausgewählt: das eigene Ziel (bei mehreren nur, wenn alle dasselbe haben), sonst der Vorschlag.
+async function showTargetDialog(containerId, entries, onDone = () => {}) {
+  if (blockedByLock()) return;
+  try {
+    await containersReady();
+  } catch (err) {
+    toast(`Fehler (${err.code || err.message})`, 4000);
+    return;
+  }
+  const options = targetOptions("item", containerId, allContainers);
+  const inherited = containerTarget(containerId, allContainers);
+  const owns = entries.map((e) => cleanTargetId(e.item.target) || "");
+  const sameOwn = owns.every((o) => o === owns[0]) ? owns[0] : "";
+  const common = commonTarget(entries.map((e) => targetInfo(containerId, e.item)));
+  const preselect = sameOwn || (common?.kind === "suggest" ? common.id : "");
+  const { overlay, close } = openDialog(`
+    <strong></strong>
+    <p class="muted dialog-note">Zeigt beim Auspacken, wohin es gehört. Liegt es dort, verschwindet der Hinweis von selbst.</p>
+    <label class="muted" for="target-select">Gehört nach</label>
+    <select id="target-select" class="big-select" aria-describedby="target-hint">
+      <option value="">${inherited ? `– wie ${escapeHtml(nameOf(inherited.via))}: ${escapeHtml(targetLabel(inherited.id))} –` : "– kein Ziel –"}</option>
+      ${options.map((o) => `<option value="${escapeHtml(o.id)}"${o.id === preselect ? " selected" : ""}>${escapeHtml(o.label)}</option>`).join("")}
+    </select>
+    <small class="muted target-hint" id="target-hint" role="status"></small>
+    <div class="photo-actions">
+      <button type="button" data-action="ok">Speichern</button>
+      <button type="button" data-action="close" class="secondary">Abbrechen</button>
+    </div>
+  `);
+  overlay.querySelector("strong").textContent = entries.length === 1 ? entries[0].item.name : `${entries.length} Artikel`;
+  const select = overlay.querySelector("#target-select");
+  const hint = overlay.querySelector("#target-hint");
+  if (!sameOwn && preselect && select.value === preselect) {
+    hint.textContent = "Vorschlag – mit «Speichern» übernehmen.";
+    hint.classList.add("is-suggestion");
+  } else if (!sameOwn && owns.some(Boolean)) {
+    hint.textContent = "Die Artikel haben unterschiedliche Ziele.";
+  }
+  const initial = select.value;
+  select.addEventListener("change", () => { hint.textContent = ""; hint.classList.remove("is-suggestion"); });
+  overlay.querySelector('[data-action="ok"]').addEventListener("click", () => {
+    // Nichts geändert (z.B. "unterschiedliche Ziele" offen gelassen) → nichts schreiben. Ein
+    // vorausgewählter Vorschlag wird dagegen mit "Speichern" bewusst übernommen.
+    if (select.value === initial && select.value === sameOwn && owns.every((o) => o === select.value)) {
+      close();
+      return;
+    }
+    if (select.value === initial && !sameOwn && !preselect && owns.some(Boolean)) {
+      close();
+      return;
+    }
+    if (!saveItemTargets(containerId, entries, select.value)) return;
+    close();
+    onDone();
+  });
+}
+
+// Detailansicht eines Artikels: Foto gross, Foto ändern, MHD, Verschieben, Gehört nach, Entfernen.
 function showItemDetails(containerId, itemId, item) {
   const hasPhoto = isSafePhoto(item.photo);
   const iconId = iconForItem(item);
@@ -825,6 +1043,7 @@ function showItemDetails(containerId, itemId, item) {
     <strong></strong>
     <span class="muted">${escapeHtml(String(item.qty ?? 1))} ${escapeHtml(item.unit || "")}</span>
     <span class="muted">${isValidIsoDate(item.mhd) ? mhdBadge(item.mhd) : "MHD: –"}</span>
+    ${targetLine(targetInfo(containerId, item), { inherited: true, cls: "detail-target" })}
     ${ro ? `<span class="muted">${escapeHtml(LOCKED_TEXT)}.</span>` : `
     <div class="photo-actions">
       <button type="button" data-action="change">${icon("camera")}${hasPhoto ? "Foto ändern" : "Foto"}</button>
@@ -833,6 +1052,9 @@ function showItemDetails(containerId, itemId, item) {
     <div class="photo-actions">
       <button type="button" data-action="mhd" class="neutral">${icon("calendar")}MHD</button>
       <button type="button" data-action="move" class="neutral">${icon("move")}Verschieben</button>
+    </div>
+    <div class="photo-actions">
+      <button type="button" data-action="target" class="neutral">${icon("flag")}Gehört nach …</button>
     </div>
     <div class="photo-actions">
       <button type="button" data-action="del" class="danger">${icon("trash")}Entfernen</button>
@@ -864,6 +1086,10 @@ function showItemDetails(containerId, itemId, item) {
     close();
     showMoveDialog(containerId, [{ itemId, item }]);
   });
+  overlay.querySelector('[data-action="target"]').addEventListener("click", () => {
+    close();
+    showTargetDialog(containerId, [{ itemId, item }]);
+  });
   const delBtn = overlay.querySelector('[data-action="del"]');
   delBtn.addEventListener("click", confirmFirst(delBtn, () => {
     close();
@@ -879,7 +1105,8 @@ async function moveTargets(fromId) {
     .map((o) => ({ id: o.id, name: allContainers.get(o.id)?.name || o.id, label: o.label }));
 }
 
-// Verschieben-Dialog für einen oder mehrere Artikel: entries = [{ itemId, item }].
+// Verschieben-Dialog für einen oder mehrere Artikel: entries = [{ itemId, item }]. Haben alle dasselbe
+// Ziel (eigenes, geerbtes oder Vorschlag), ist es vorausgewählt – verschoben wird erst mit "Verschieben".
 async function showMoveDialog(fromId, entries, onDone = () => {}) {
   const { overlay, close } = openDialog(`
     <strong></strong>
@@ -901,6 +1128,16 @@ async function showMoveDialog(fromId, entries, onDone = () => {}) {
       ? targets.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.label)}</option>`).join("")
       : `<option value="">Kein anderer Behälter vorhanden</option>`;
     ok.disabled = !targets.length;
+    const common = commonTarget(entries.map((e) => targetInfo(fromId, e.item)));
+    if (common && targets.some((c) => c.id === common.id)) {
+      const hint = overlay.querySelector("#move-hint");
+      select.value = common.id;
+      hint.textContent = common.kind === "suggest"
+        ? `Vorschlag: ${pathLabel(common.id)} – bitte prüfen.`
+        : `Gehört nach ${pathLabel(common.id)} – vorausgewählt.`;
+      hint.classList.add(common.kind === "suggest" ? "is-suggestion" : "move-hint-ok");
+      select.addEventListener("change", () => { hint.textContent = ""; hint.classList.remove("is-suggestion", "move-hint-ok"); }, { once: true });
+    }
     setupMoveScan(overlay, fromId, targets);
     ok.addEventListener("click", () => {
       const target = targets.find((c) => c.id === select.value);
@@ -938,7 +1175,7 @@ function setupMoveScan(overlay, fromId, targets) {
           return false;
         }
         if (!overlay.isConnected) return true;
-        hint.classList.remove("move-hint-ok");
+        hint.classList.remove("move-hint-ok", "is-suggestion");
         if (r.error === "same") {
           hint.textContent = "Das ist der Behälter, aus dem verschoben wird. Bitte ein anderes Ziel scannen.";
         } else if (r.error === "unknown" || !targets.some((t) => t.id === r.id)) {
@@ -965,6 +1202,8 @@ function itemBackup(item) {
   if (isSafePhoto(item.photo)) data.photo = item.photo;
   if (isValidIsoDate(item.mhd)) data.mhd = item.mhd;
   if (isKnownIcon(item.icon)) data.icon = item.icon;
+  const target = cleanTargetId(item.target);
+  if (target) data.target = target;
   return data;
 }
 
@@ -973,6 +1212,13 @@ function itemBackup(item) {
 // Mit "Rückgängig" (ebenfalls ein Batch).
 async function moveItems(fromId, entries, target) {
   if (blockedByLock()) return;
+  // Ziel, das der Artikel am neuen Ort tragen soll: das eigene, sonst das geerbte (z.B. von Kiste 1 in
+  // Kiste 2 umgepackt → "Küche" bleibt). Am Ziel angekommen → keins (kein veralteter Hinweis).
+  const carriedTarget = (item) => {
+    const info = containersLoaded ? itemTarget(item, fromId, allContainers) : null;
+    const t = info ? info.id : cleanTargetId(item.target);
+    return t && !isTargetReached(target.id, t, allContainers) ? t : undefined;
+  };
   try {
     const plans = await Promise.all(entries.map(async ({ itemId, item }) => {
       const targetItemId = isValidId(itemId) ? itemId : slugify(item.name);
@@ -1010,11 +1256,21 @@ async function moveItems(fromId, entries, target) {
         if (!isSafePhoto(t.photo) && isSafePhoto(p.item.photo)) { upd.photo = p.item.photo; back.photo = deleteField(); }
         if (!isValidIsoDate(t.mhd) && isValidIsoDate(p.item.mhd)) { upd.mhd = p.item.mhd; back.mhd = deleteField(); }
         if (!isKnownIcon(t.icon) && isKnownIcon(p.item.icon)) { upd.icon = p.item.icon; back.icon = deleteField(); }
+        // Eigenes oder geerbtes Ziel mitnehmen, solange es am neuen Ort nicht erreicht ist.
+        const ownTarget = carriedTarget(p.item);
+        if (!cleanTargetId(t.target) && ownTarget && !isTargetReached(target.id, ownTarget, allContainers)) {
+          upd.target = ownTarget;
+          back.target = deleteField();
+        }
         batch.update(p.dst, upd);
         undoTarget.push((b) => b.update(p.dst, back));
       } else {
         const data = itemBackup(p.item);
         data.unit = unit;
+        // Am Ziel angekommen → Ziel entfernen (kein veralteter Hinweis).
+        delete data.target;
+        const carried = carriedTarget(p.item);
+        if (carried) data.target = carried;
         batch.set(p.dst, data);
         undoTarget.push((b) => b.delete(p.dst));
       }
@@ -1028,14 +1284,21 @@ async function moveItems(fromId, entries, target) {
       movedPlans.push(p);
     }
     const moved = movedPlans.length;
+    // Wie viele kommen damit an ihrem (eigenen oder geerbten) Ziel an?
+    const arrived = movedPlans.filter((p) => {
+      const info = containersLoaded ? itemTarget(p.item, fromId, allContainers) : null;
+      return info && isTargetReached(target.id, info.id, allContainers);
+    }).length;
     if (skipped.length) {
       alert(`Nicht verschoben nach "${target.name}" (andere Einheit o.ä.): ${skipped.join(", ")}. Bitte dort zuerst anpassen.`);
     }
     if (!moved) return;
     background(batch.commit().then(() => emit("move-done", { containerId: target.id })), "Verschieben");
+    patchItemIndex(fromId, target.id, movedPlans.map((p) => String(p.item.name ?? "").slice(0, MAX_NAME)));
     const label = moved === 1 ? `"${movedPlans[0].item.name}"` : `${moved} Artikel`;
     const hash = moved === 1 ? `#i=${encodeURIComponent(movedPlans[0].targetItemId)}` : "";
-    toast(`${label} → ${target.name}`, {
+    const atTarget = !arrived ? "" : moved === 1 ? " · am Ziel" : ` · ${arrived === moved ? "alle" : arrived} am Ziel`;
+    toast(`${label} → ${target.name}${atTarget}`, {
       ms: 6000,
       actions: [
         { label: "Öffnen", fn: () => { setTimeout(() => { location.href = `index.html?c=${encodeURIComponent(target.id)}${hash}`; }, 300); } },
@@ -1404,6 +1667,7 @@ function showLogout(user) {
   btn.addEventListener("click", async () => {
     await signOut(auth);
     storageSet(QR_LIST_KEY, null);
+    sessionSet(ITEM_INDEX_KEY, null);
     clearPracticeStorage();
     // Offline-Kopie der Daten auf diesem Gerät löschen (wichtig auf fremden/geteilten Geräten).
     try {
@@ -1524,6 +1788,7 @@ function clearPracticeStorage() {
     for (const k of Object.keys(localStorage)) {
       if (k.startsWith("uebung:") || k === "vorrat-uebung-db") localStorage.removeItem(k);
     }
+    for (const k of Object.keys(sessionStorage)) if (k.startsWith("uebung:")) sessionStorage.removeItem(k);
   } catch {}
 }
 
@@ -1533,6 +1798,7 @@ function resetPractice() {
   firestoreMod.resetPracticeData();
   try {
     for (const k of Object.keys(localStorage)) if (k.startsWith("uebung:")) localStorage.removeItem(k);
+    for (const k of Object.keys(sessionStorage)) if (k.startsWith("uebung:")) sessionStorage.removeItem(k);
   } catch {}
   loadTutorial().then((m) => m.stopTutorial()).catch(() => {}).finally(() => {
     location.href = "index.html";
@@ -1985,7 +2251,7 @@ function renderExpiring() {
     .catch((err) => showError(list, err));
 }
 
-// --- Behälter bearbeiten: Name, Typ, "liegt in", löschen ---
+// --- Behälter bearbeiten: Name, Typ, "liegt in", "gehört nach", löschen ---
 
 function showContainerSettings(id, onDeleted) {
   const canDelete = isValidId(id); // ältere IDs könnten nach dem Löschen nicht wiederhergestellt werden
@@ -2002,6 +2268,11 @@ function showContainerSettings(id, onDeleted) {
       <option value="">– nirgends (oberste Ebene) –</option>
       ${options.map((o) => `<option value="${escapeHtml(o.id)}"${o.id === c.parent ? " selected" : ""}>${escapeHtml(o.label)}</option>`).join("")}
     </select>
+    <label class="muted" for="cs-target">Gehört nach (Umzug)</label>
+    <select id="cs-target" class="big-select">
+      <option value="">– kein Ziel –</option>
+      ${options.map((o) => `<option value="${escapeHtml(o.id)}"${o.id === c.target ? " selected" : ""}>${escapeHtml(o.label)}</option>`).join("")}
+    </select>
     <div class="photo-actions">
       <button type="button" data-action="save">Speichern</button>
       <button type="button" data-action="close" class="secondary">Abbrechen</button>
@@ -2013,6 +2284,7 @@ function showContainerSettings(id, onDeleted) {
   `);
   const nameInput = overlay.querySelector("#cs-name");
   nameInput.value = c.name;
+  const initialTarget = overlay.querySelector("#cs-target").value;
   overlay.querySelector('[data-action="save"]').addEventListener("click", () => {
     const name = nameInput.value.trim().slice(0, MAX_NAME);
     const type = overlay.querySelector("#cs-type").value;
@@ -2025,13 +2297,31 @@ function showContainerSettings(id, onDeleted) {
       toast("Ein Behälter kann nicht in sich selbst oder einem eigenen Unterbehälter liegen", 4000);
       return;
     }
+    // Ziel: nicht er selbst, kein eigener Unterbehälter. Liegt er (mit dem neuen "liegt in") schon
+    // im Ziel, wird es entfernt – angekommen, kein veralteter Hinweis.
+    let target = overlay.querySelector("#cs-target").value;
+    // Unverändert gelassen (auch ein nicht mehr wählbares altes Ziel) → Feld nicht anfassen.
+    const keepOld = target === initialTarget && !(target && isTargetReached(parent, target, allContainers));
+    const targetErr = target ? containerTargetError(id, target, allContainers) : null;
+    if (targetErr && targetErr !== "reached") {
+      toast(TARGET_ERRORS[targetErr], 4000);
+      return;
+    }
+    let note = "";
+    if (target && isTargetReached(parent, target, allContainers)) {
+      note = target === c.target ? " – Ziel erreicht" : " – liegt schon dort, kein Ziel nötig";
+      target = "";
+    }
     close();
-    background(setDoc(doc(db, "containers", id), {
+    const data = {
       name,
       type: CONTAINER_TYPES[type] ? type : deleteField(),
       parent: parent || deleteField(),
-    }, { merge: true }), "Speichern");
-    toast("Gespeichert");
+    };
+    if (!keepOld || (c.target && isTargetReached(parent, c.target, allContainers))) data.target = target || deleteField();
+    background(setDoc(doc(db, "containers", id), data, { merge: true }), "Speichern");
+    toast(`Gespeichert${note}`, note ? 3000 : undefined);
+    if (target !== (c.target || "")) emit("target-saved", { containerId: id });
   });
   const deleteBtn = overlay.querySelector('[data-action="delete"]');
   deleteBtn?.addEventListener("click", confirmFirst(deleteBtn, async () => {
@@ -2111,9 +2401,10 @@ function renderContainer(id) {
       <div class="title-row">
         <h1 id="container-title">…</h1>
         <button type="button" class="link-btn" id="select-btn" aria-label="Mehrere Artikel auswählen" title="Auswählen und verschieben">${icon("select")}</button>
-        <button type="button" class="link-btn" id="edit-btn" aria-label="Behälter bearbeiten" title="Umbenennen, Typ, liegt in, löschen">${icon("edit")}</button>
+        <button type="button" class="link-btn" id="edit-btn" aria-label="Behälter bearbeiten" title="Umbenennen, Typ, liegt in, gehört nach, löschen">${icon("edit")}</button>
         <a class="link-btn" id="qr-link" href="qr.html" data-qr aria-label="QR-Code für diesen Behälter">${icon("qr")}</a>
       </div>
+      <p class="hero-target" id="container-target" hidden></p>
       <div class="container-meta">
         <small class="muted" id="container-type"></small>
         <p class="item-count" id="item-count" hidden></p>
@@ -2123,10 +2414,14 @@ function renderContainer(id) {
     <h2 class="section-label" id="items-heading" hidden>Artikel</h2>
     <div class="search-field" hidden>${icon("search")}<input type="search" id="item-filter" class="search-input"
       placeholder="In diesem Behälter filtern" autocomplete="off" aria-label="Artikel filtern" /></div>
+    <div class="target-tools" id="target-tools" hidden>
+      <button type="button" class="chip" id="group-toggle" aria-pressed="false">${icon("flag")}Nach Ziel ordnen</button>
+    </div>
     <div id="items"><p class="empty-hint">Lade…</p></div>
     <div class="select-bar" id="select-bar" hidden>
       <span id="select-count">0 gewählt</span>
       <button type="button" id="select-all" class="secondary">Alle</button>
+      <button type="button" id="select-target" class="secondary" aria-label="Ziel setzen (gehört nach …)" disabled>Ziel</button>
       <button type="button" id="select-move" disabled>Verschieben</button>
       <button type="button" id="select-cancel" class="secondary" aria-label="Auswahl beenden">${icon("close")}</button>
     </div>
@@ -2170,6 +2465,11 @@ function renderContainer(id) {
   const countEl = document.getElementById("item-count");
   const itemsHeading = document.getElementById("items-heading");
   const selectBar = document.getElementById("select-bar");
+  const heroTarget = document.getElementById("container-target");
+  const targetTools = document.getElementById("target-tools");
+  const groupToggle = document.getElementById("group-toggle");
+  let groupByTargetOn = storageGet(GROUP_BY_TARGET_KEY) === "1";
+  let containersSig = "";
   let containerName = id;
   let previewUrl = null;
   let currentItems = new Map();
@@ -2298,6 +2598,19 @@ function renderContainer(id) {
     childrenEl.innerHTML = kids.length ? `<h2 class="section-label">Darin</h2>` : "";
     for (const k of kids) childrenEl.appendChild(containerCard(k.id));
     updateItemCount();
+    // Ziel des Behälters (eigenes oder von einem Behälter darüber geerbt) im Kopf, sonst nichts.
+    const t = containerTarget(id, allContainers);
+    heroTarget.hidden = !t;
+    heroTarget.innerHTML = t
+      ? `<span aria-hidden="true">→</span><span class="sr-only">Gehört nach</span> <span>${escapeHtml(targetLabel(t.id))}</span>${t.via !== id ? ` <span class="target-via">· über ${escapeHtml(nameOf(t.via))}</span>` : ""}`
+      : "";
+    // Ziele/Vorschläge der Artikel hängen an den Behältern – nur neu aufbauen, wenn sich dafür etwas
+    // geändert hat (sonst gehen Fokus und ein angefangenes "Löschen?" verloren).
+    const sig = JSON.stringify([...allContainers].map(([cid, c]) => [cid, c.name, c.type, c.parent, c.target]));
+    if (sig !== containersSig) {
+      containersSig = sig;
+      renderItems();
+    }
   });
 
   document.getElementById("edit-btn").addEventListener("click", async () => {
@@ -2317,6 +2630,7 @@ function renderContainer(id) {
     const backup = { name: c.name || containerName, createdAt: serverTimestamp() };
     if (c.type) backup.type = c.type;
     if (c.parent) backup.parent = c.parent;
+    if (c.target && c.target !== id) backup.target = c.target;
     background(deleteDoc(doc(db, "containers", id)), "Löschen");
     showDeleted(backup);
   }
@@ -2396,8 +2710,10 @@ function renderContainer(id) {
     for (const sid of [...selected]) if (!currentItems.has(sid)) selected.delete(sid);
     selectBar.hidden = !selecting;
     document.body.classList.toggle("selecting", selecting);
-    document.getElementById("select-count").textContent = `${selected.size} gewählt`;
+    // Schmale Handys: nur die Zahl sichtbar, "gewählt" bleibt für Screenreader (CSS .sel-word).
+    document.getElementById("select-count").innerHTML = `${selected.size}<span class="sel-word"> gewählt</span>`;
     document.getElementById("select-move").disabled = !selected.size;
+    document.getElementById("select-target").disabled = !selected.size;
     document.getElementById("select-btn").setAttribute("aria-pressed", String(selecting));
   }
   function setSelecting(on) {
@@ -2416,10 +2732,23 @@ function renderContainer(id) {
     else all.forEach((k) => selected.add(k));
     renderItems();
   });
+  function selectedEntries() {
+    return [...selected].filter((k) => currentItems.has(k)).map((k) => ({ itemId: k, item: currentItems.get(k) }));
+  }
   document.getElementById("select-move").addEventListener("click", () => {
-    const entries = [...selected].filter((k) => currentItems.has(k)).map((k) => ({ itemId: k, item: currentItems.get(k) }));
+    const entries = selectedEntries();
     if (!entries.length) return;
     showMoveDialog(id, entries, () => setSelecting(false));
+  });
+  document.getElementById("select-target").addEventListener("click", () => {
+    const entries = selectedEntries();
+    if (!entries.length) return;
+    showTargetDialog(id, entries, () => setSelecting(false));
+  });
+  groupToggle.addEventListener("click", () => {
+    groupByTargetOn = !groupByTargetOn;
+    storageSet(GROUP_BY_TARGET_KEY, groupByTargetOn ? "1" : "0");
+    renderItems();
   });
 
   const itemsQuery = query(collection(db, "containers", id, "items"), orderBy("name"));
@@ -2448,10 +2777,24 @@ function renderContainer(id) {
 
     visibleIds = [];
     if (snap.empty) {
+      targetTools.hidden = true;
       itemsEl.innerHTML = `<p class="empty-hint">${childrenEl.hidden ? "Leer – füge unten etwas hinzu." : "Keine Artikel direkt hier."}</p>`;
       return;
     }
+    // Vorschläge nur, wenn dieser Behälter sie braucht (Umzugskiste oder Artikel mit Ziel) – dann wird
+    // einmal der Artikel-Index geladen (gleiche Abfrage wie die Suche, gemerkt), sonst gar nichts.
+    const wantSuggestions = needsSuggestions(id, allContainers, [...currentItems.values()]);
+    if (wantSuggestions && !itemIndexPromise) ensureItemIndex().then(() => renderItems());
+    suggestState.containerId = id;
+    suggestState.active = wantSuggestions && itemIndexDone;
+
     let entries = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    // Ziel/Vorschlag pro Artikel (vor dem Filtern, damit "Nach Ziel ordnen" nicht springt).
+    const infos = new Map(entries.map((e) => [e.id, targetInfo(id, e)]));
+    const groupable = canGroupByTarget(entries.map((e) => ({ id: e.id, info: infos.get(e.id) })));
+    targetTools.hidden = !groupable || selecting;
+    groupToggle.setAttribute("aria-pressed", String(groupByTargetOn));
+    const grouped = groupable && groupByTargetOn && !selecting;
     if (normalizeSearch(filterInput.value)) {
       entries = searchItems(entries.map((e) => ({ ...e, containerName: "" })), filterInput.value, Infinity);
       if (!entries.length) {
@@ -2460,16 +2803,38 @@ function renderContainer(id) {
       }
     }
     itemsEl.innerHTML = "";
+    const groupHeads = new Map(); // erste Artikel-ID einer Gruppe → Überschrift
+    if (grouped) {
+      // "Auspacken"-Ansicht: Überschrift pro Ziel, darunter die Artikel; die Zeilen selbst ohne Zielzeile.
+      const groups = groupByTarget(entries.map((e) => ({ id: e.id, item: e, info: infos.get(e.id) })), (tid) => (tid ? pathLabel(tid) : ""));
+      entries = [];
+      for (const g of groups) {
+        const h = document.createElement("h3");
+        h.className = `target-group${g.suggest ? " is-suggestion" : ""}${g.targetId ? "" : " no-target"}`;
+        h.innerHTML = !g.targetId
+          ? "Ohne Ziel"
+          : `${g.suggest ? "Vorschlag: " : ""}<span aria-hidden="true">→</span><span class="sr-only">gehört nach</span> ${escapeHtml(targetLabel(g.targetId))}`;
+        h.dataset.target = g.targetId || "";
+        groupHeads.set(g.rows[0].id, h);
+        g.rows.forEach((r) => entries.push(r.item));
+      }
+    }
     visibleIds = entries.map((e) => e.id);
     for (const item of entries) {
       const itemId = item.id;
+      if (groupHeads.has(itemId)) itemsEl.appendChild(groupHeads.get(itemId));
+      const tline = grouped ? "" : targetLine(infos.get(itemId));
+      // Der Name-Knopf hat ein aria-label – die Zielzeile dort mit vorlesen.
+      const tinfo = infos.get(itemId);
+      const tlabel = !tinfo || tinfo.kind === "inherited" ? ""
+        : `, ${tinfo.kind === "suggest" ? "Vorschlag: " : ""}gehört nach ${targetLabel(tinfo.id)}`;
       if (selecting) {
         const row = document.createElement("label");
         row.className = "card select-card";
         row.dataset.id = itemId;
         row.innerHTML = `
           <input type="checkbox" class="select-box" ${selected.has(itemId) ? "checked" : ""} />
-          <div class="name"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(String(item.qty ?? 1))} ${escapeHtml(item.unit || "")}${mhdSuffix(item.mhd)}</small></div>`;
+          <div class="name"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(String(item.qty ?? 1))} ${escapeHtml(item.unit || "")}${mhdSuffix(item.mhd)}</small>${tline}</div>`;
         row.querySelector("input").addEventListener("change", (e) => {
           if (e.target.checked) selected.add(itemId); else selected.delete(itemId);
           updateSelectBar();
@@ -2488,8 +2853,8 @@ function renderContainer(id) {
         <button type="button" class="thumb-btn${hasPhoto || busy ? "" : shownIcon ? " has-icon" : " no-photo"}" data-action="photo" aria-label="${hasPhoto ? "Foto anzeigen" : shownIcon ? "Details, Icon und Foto" : "Foto hinzufügen"}">
           ${busy ? `<span class="spinner">${icon("hourglass")}</span>` : thumbContent(item)}
         </button>
-        <button type="button" class="name name-btn" data-action="details" aria-label="Details zu ${escapeHtml(item.name)}">
-          <strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.unit || "")}${mhdSuffix(item.mhd)}</small>
+        <button type="button" class="name name-btn" data-action="details" aria-label="Details zu ${escapeHtml(item.name)}${escapeHtml(tlabel)}">
+          <strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.unit || "")}${mhdSuffix(item.mhd)}</small>${tline}
         </button>
         <div class="qty-controls">
           <button type="button" class="round" data-action="dec" aria-label="${step === 1 ? "Eins weniger" : `${step} weniger`}">−</button>

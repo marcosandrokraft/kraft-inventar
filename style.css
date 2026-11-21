@@ -1132,3 +1132,61 @@ html.framed body::before {
   content: "Vorrat kann nur direkt geöffnet werden, nicht eingebettet in eine andere Seite.";
   display: block; max-width: 32rem; margin: 3rem auto; padding: 0 1rem; color: var(--text); font-weight: 650;
 }
+
+/* ---------- Umzug: "Gehört nach …" (Paket Ziel) ----------
+   Nur sichtbar, wenn ein Ziel/Vorschlag existiert. Feste Ziele in Messing (wie der Pfad), Vorschläge
+   gedämpft und kursiv – deutlich als Vorschlag erkennbar. Ohne Ziele sieht alles aus wie bisher. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+/* Im Marine-Kopf unter dem Namen: "→ Küche" (Messing auf Marine, 9:1) */
+.hero-target { margin: 0.1rem 0 0; color: var(--brass); font-size: 0.95rem; font-weight: 650; line-height: 1.35; overflow-wrap: anywhere; }
+.hero-target[hidden] { display: none; }
+.hero-target .target-via { color: var(--hero-muted); font-weight: 550; }
+/* Artikelzeile und Details: kleine Zeile unter Einheit/MHD */
+.card .name small.item-target { color: var(--accent); font-weight: 600; overflow-wrap: anywhere; }
+.detail-target { color: var(--accent); font-size: 0.95rem; font-weight: 600; overflow-wrap: anywhere; }
+.card .name small.item-target.is-suggestion,
+.detail-target.is-suggestion,
+.target-hint.is-suggestion,
+#move-hint.is-suggestion { color: var(--muted); font-style: italic; font-weight: 500; }
+.target-via { color: var(--muted); font-weight: 500; }
+.target-hint:empty { display: none; }
+.target-hint { overflow-wrap: anywhere; }
+/* "Nach Ziel ordnen" (Auspacken-Ansicht): ruhiger Schalter rechts über der Liste */
+.target-tools { display: flex; justify-content: flex-end; margin: 0 0 0.6rem; }
+.target-tools[hidden] { display: none; }
+.target-tools .chip { font: inherit; font-size: 0.88rem; font-weight: 600; cursor: pointer; }
+.target-tools .chip .icon { color: var(--accent); }
+.target-tools .chip[aria-pressed="true"] { background: var(--ink); color: var(--ink-contrast); box-shadow: none; }
+.target-tools .chip[aria-pressed="true"] .icon { color: inherit; }
+.target-tools .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Gruppen-Überschrift in der Auspacken-Ansicht */
+#items > h3.target-group {
+  margin: 0;
+  padding: 1.15rem 0 0.2rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+#items > h3.target-group:first-child { padding-top: 0.7rem; }
+#items > h3.target-group.is-suggestion { color: var(--muted); font-style: italic; font-weight: 600; }
+#items > h3.target-group.no-target { color: var(--muted); }
+/* Auswahlleiste mit "Ziel": auf schmalen Handys nur die Zahl zeigen und Knöpfe etwas schmaler */
+@media (max-width: 380px) {
+  .select-bar { gap: 0.3rem; }
+  .select-bar button { padding: 0 0.7rem; }
+  .select-bar .sel-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+  .select-bar span#select-count { flex: 0 1 auto; min-width: 1.4rem; text-align: center; font-variant-numeric: tabular-nums; }
+  .select-bar #select-move { flex: 1 1 auto; }
+}
