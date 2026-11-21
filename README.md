@@ -86,6 +86,14 @@ die Regeln in der Konsole erneut veröffentlichen.
 - Häkchen-Knopf neben dem Behälternamen: **Umzugsmodus** – mehrere Artikel ankreuzen und auf einmal
   verschieben (mit Rückgängig). Auf Android/Chrome kann das Ziel auch per QR-Code gescannt werden
   ("Ziel-QR-Code scannen"; nur bestehende Behälter, der Scan wählt das Ziel nur aus).
+- **Gehört nach …** (Umzug): Im Bearbeiten-Dialog eines Behälters ("Kiste 1 → Küche"), in den Details
+  eines Artikels oder in der Auswahl ("Ziel", mehrere auf einmal) festlegen, wohin etwas beim Auspacken
+  gehört. Artikel ohne eigenes Ziel erben das Ziel ihrer Kiste. Im Kopf des Behälters steht "→ Küche",
+  in den Artikelzeilen "→ Küche › Schublade oben". In Umzugskisten ohne Ziel (Name mit Kiste, Karton,
+  Umzug) schlägt die App Ziele vor ("Vorschlag: → Bad", kursiv) – aus gleichnamigen Artikeln an festen
+  Orten oder aus der Art des Artikels; Vorschläge werden nie gespeichert. "Nach Ziel ordnen" gruppiert
+  die Kiste nach Zielen. Beim Verschieben ist das Ziel vorausgewählt; ist etwas angekommen, verschwindet
+  der Hinweis. Ohne Ziele sieht alles aus wie bisher.
 - Leiste unten: Übersicht, Suchen, Scannen (Android/Chrome), **Läuft ab** (alle Artikel mit MHD
   abgelaufen oder in ≤ 3 bzw. ≤ 7 Tagen, nach Datum, mit Behälterpfad; antippen öffnet den Behälter),
   **Zuletzt** (zuletzt geöffnete Behälter, nur auf diesem Gerät gespeichert).

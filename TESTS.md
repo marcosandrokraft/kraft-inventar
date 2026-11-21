@@ -18,6 +18,11 @@ voller Speicher), `tests/unit/tutorial.test.mjs` (Schritte, Zustand, Bedingungen
 Paket Schutz: `tests/unit/schutz.test.mjs` (Anmelde-Mails pro Gerät: 60 s Abstand, 3/Stunde, 5/Tag;
 Formatprüfung der Adresse; Rücksprung-Adresse nur mit `c`/`n`; QR-Bogen höchstens 500 Behälter;
 Übungs-Grenzen 60 Behälter / 400 Artikel / 20 Fotos / 2 Mio. Zeichen, alles-oder-nichts, Stand über der Grenze bleibt änderbar).
+Paket Ziel: `tests/unit/ziel.test.mjs` (46 Tests: Ziel erreicht, Prüfung Selbst/Zyklus/schon dort,
+Auswahl, Vererbung über Kisten und Unterbehälter, ungültige/gelöschte Ziele, Umzugskisten erkennen,
+ähnliche Namen, Vorschläge aus gleichem Namen und aus der Kategorie mit vielen Fällen – eindeutig,
+mehrdeutig, Boxen/Kisten ausgeschlossen, kurze Wörter nur am Wortanfang –, Beispieldaten der Übung,
+Vorauswahl im Verschieben-Dialog, gekürzter Pfad, Auspacken-Gruppen).
 Braucht nur Node.js (getestet mit v16.16.0), kein Java, kein Netz:
 
 ```sh
@@ -45,11 +50,18 @@ unbestätigter Adresse, bestätigt aber nicht in members, anonym, fremdes Konto 
 ohne Bestätigung – lesen nichts (Behälter, Artikel, Listen, Collection-Group, members, settings/lock, unbekannte
 Sammlungen) und schreiben nichts (auch keine Freischaltung, keine Sperre, keine eigenen Sammlungen).
 
+`tests/rules/ziel.test.mjs` (Paket Ziel): optionales `target` an Behältern und Artikeln (String, 1–100
+Zeichen, ohne "/"; beim Behälter nicht die eigene ID), setzen/entfernen per merge, update, deleteField und
+Batch; ungültige Werte abgelehnt; Nicht-Mitglieder und (bei Sperre) Nicht-Owner dürfen kein Ziel setzen.
+
 ### Voraussetzungen
 
 - Node.js 16 oder neuer (getestet mit v16.16.0), danach einmal `npm install`.
 - Java 11 oder neuer für den Firestore-Emulator (getestet mit Eclipse Temurin 17 JRE).
   Eine portable JRE/JDK genügt, sie muss nur beim Aufruf im `PATH` stehen.
+  Sie braucht das Modul `jdk.httpserver` (`java --list-modules`); abgespeckte Laufzeiten, die andere
+  Programme mitbringen, fehlt es oft – dann bricht der Emulator mit `NoClassDefFoundError:
+  com/sun/net/httpserver/HttpHandler` ab.
 - Die Versionen sind auf Node 16 abgestimmt und fest eingetragen:
   `firebase-tools@12.9.1`, `firebase@9.23.0`, `@firebase/rules-unit-testing@2.0.7`.
   Der Eintrag `overrides.universal-analytics = 0.5.3` in `package.json` ist nötig, weil
@@ -123,6 +135,15 @@ Paket Schutz: F10 Übungs-Grenzen (Meldung mit "Übung zurücksetzen"), Foto in 
 (Formatprüfung, Bot-Falle, neutrale Meldung, Rücksprung-Adresse, Abkühlzeit, Stundenlimit nach Neuladen,
 Tageslimit von Firebase mit gefälschtem `auth/quota-exceeded`); F12 eingebettet in fremde Seite → nichts
 bedienbar (index.html und qr.html), überlange `?c=`, QR-Bogen mit 1000 Behältern im Link → 500.
+
+`tests/e2e/ziel.mjs` (Paket Ziel, läuft mit `npm run test:e2e` nach features.mjs): Z1 Behälter-Ziel im
+Bearbeiten-Dialog (ohne sich selbst/Unterbehälter, Vererbung in den Unterbehälter, "liegt in" = Ziel
+entfernt das Ziel, Name mit HTML), Z2 Artikel-Ziel in den Details (eigenes/geerbtes, Rückgängig,
+Entfernen), Z3 Mehrfachauswahl "Ziel" (ein Batch), Z4 Vorschläge (kursiv, nie gespeichert, genau eine
+Artikel-Abfrage, nach Neuladen keine; Auspacken-Ansicht; normaler Behälter wie bisher ohne Abfrage),
+Z5 Verschieben mit Vorauswahl (einzeln, mehrere, Vorschlag), Ankunft entfernt das Ziel, Rückgängig,
+Z6 Sperre, Z7 Übungsmodus, Z8 360 px (kein Scrollen, Knöpfe ≥ 44 px), Z9 Umpacken behält geerbtes
+Ziel, Umbenennen lässt das Ziel stehen, Speichern ohne Änderung schreibt nichts.
 
 ```sh
 npm run test:e2e

@@ -1,6 +1,7 @@
 # Aktueller Stand
 
-Letzter Stand: 2026-11-21, Paket "Schutz" (Branch `schutz-besucher`, noch nicht gemergt/gepusht). Diese Datei fasst den Fortschritt zusammen, damit man (auch mit einer
+Letzter Stand: 2026-11-21, Paket "Ziel" (Branch `ziel-umzug`, noch nicht gemergt/gepusht; **vorher
+neue Regeln veröffentlichen**, siehe unten). Diese Datei fasst den Fortschritt zusammen, damit man (auch mit einer
 neuen Claude-Session auf einem anderen Gerät) nahtlos weitermachen kann.
 
 **Die App läuft:** https://marcosandrokraft.github.io/kraft-inventar/ – mit Anmeldung per E-Mail-Link,
@@ -22,6 +23,59 @@ Zugriff nur für freigeschaltete Personen.
   auf das Objekt, grössere Vorschaubilder, Grossansicht mit "Foto ändern". Freistellung lokal in
   Chrome getestet (vorher war sie wegen falscher Bibliothek-URL nie gelaufen). Erstes Foto pro Gerät
   lädt ca. 56 MB KI-Modell → im WLAN machen.
+
+## Paket "Ziel" – "Gehört nach …" für den Umzug (2026-11-21, Branch `ziel-umzug`, noch nicht gemergt/gepusht)
+
+Wozu: Beim Umzug sehen Helfer beim Auspacken, wohin eine Kiste bzw. ein Artikel gehört.
+
+**Umgesetzt:**
+
+- Optionales Feld `target` (= ID eines anderen Behälters) an **Behältern** und **Artikeln**. Artikel ohne
+  eigenes Ziel erben das Ziel ihres Behälters (bzw. des nächsten Behälters darüber mit Ziel; Anzeige
+  "· über Kiste 1").
+- **Setzen/Ändern/Entfernen:** Bearbeiten-Dialog des Behälters ("Gehört nach (Umzug)"), Artikel-Details
+  ("Gehört nach …"), Mehrfachauswahl ("Ziel", ein Batch, mit Rückgängig). Auswahl mit Pfad wie im
+  Verschieben-Dialog. Nicht möglich: eigener Behälter, eigener Unterbehälter (Zyklus), ein Ort, an dem
+  es schon liegt.
+- **Ziel erreicht:** Liegt etwas im Ziel oder in einem Unterbehälter davon, wird das Ziel nicht mehr
+  angezeigt. Beim Verschieben ans Ziel wird `target` am Artikel entfernt (Meldung "· am Ziel"); beim
+  Behälter, sobald "liegt in" auf das Ziel (oder darunter) gesetzt wird (deleteField). Wird ein Artikel
+  in eine andere Kiste umgepackt, nimmt er ein geerbtes Ziel als eigenes mit.
+- **Anzeige:** im Marine-Kopf "→ Küche" (Messing, Pfad auf die letzten 2 Teile gekürzt); in Artikelzeilen
+  "→ Küche › Schublade oben" (eigenes Ziel; das geerbte steht im Kopf). "Nach Ziel ordnen" (Auspacken-
+  Ansicht, gemerkt pro Gerät) erscheint nur, wenn es mind. ein Ziel/Vorschlag und zwei Gruppen gibt.
+  Ohne Ziele sieht die App aus wie bisher.
+- **Vorschläge** (lib.js `suggestTarget`, nie gespeichert, kursiv "Vorschlag: → …"): nur in Behältern
+  ohne (geerbtes) Ziel, die Umzugskisten sind (ein Wort im Namen beginnt mit Kiste/Karton/Umzug –
+  "Werkzeugkiste" zählt nicht) oder Artikel mit noch nicht erreichtem Ziel enthalten. (a) Gleicher/ähnlicher Name liegt an einem festen Ort (keine Box, keine Umzugskiste) →
+  dorthin, wenn eindeutig; (b) Art des Artikels (Icon-Gruppe) → Raum/Schrank mit passendem Namen
+  (Lebensmittel → Küche/Vorrat, Pflege → Bad, Werkzeug → Keller/Werkstatt …), nur der oberste und nur
+  wenn eindeutig. Für (a) wird die Artikelliste der Suche **einmal** geladen und 10 Min. in
+  sessionStorage gemerkt – normale Behälter laden nichts zusätzlich.
+- **Verschieben:** Ziel bzw. Vorschlag im Verschieben-Dialog vorausgewählt (mehrere: wenn alle dasselbe
+  haben), Bestätigung wie bisher, mit Rückgängig (stellt auch das Ziel wieder her).
+- **Sperre:** Ziele sind sichtbar, ändern nur mit Schreibrecht (bei Sperre nur Owner).
+- **Übung:** Beispieldaten mit "Kiste 1" (→ Küche, Messerset → Schublade oben) und "Kiste 2" (Vorschläge).
+  Tutorial: Schritt "Verschieben" erwähnt «Ziel» (keine zusätzlichen Schritte).
+- Nicht umgesetzt (abgewählt): "Erledigt"-Knopf, Einräumen per Scan, Ziel auf dem QR-Etikett.
+- Service Worker **v16**.
+
+**Wichtig – Reihenfolge beim Veröffentlichen:**
+
+1. **Zuerst die neuen Regeln veröffentlichen:** Firebase-Konsole → Firestore Database → Regeln → Inhalt
+   von [firestore.rules](firestore.rules) einfügen → Veröffentlichen. Sonst lehnt Firestore jedes
+   Speichern mit `target` ab ("permission-denied"). Die neuen Regeln sind rückwärtskompatibel (die alte
+   App läuft damit weiter).
+2. Danach mergen und pushen: `git checkout main && git merge ziel-umzug && git push`.
+
+Hinweis: Ältere App-Versionen (noch nicht neu geladene Handys) kennen `target` nicht – sie lassen es
+beim Bearbeiten stehen, verlieren es aber, wenn sie einen Artikel verschieben.
+
+**Tests:** siehe [TESTS.md](TESTS.md) (Paket Ziel): `npm test` 229/229, `npm run test:rules` 110/110,
+`npm run test:e2e` 26/26 + 12/12 + 9/9.
+Unabhängiger Review (Subagent) gemacht; behoben: Umzugskisten nur am Wortanfang, geerbtes Ziel beim
+Umpacken, Neuaufbau nur bei relevanten Behälteränderungen, Speichern ohne Änderung schreibt nichts,
+"Küche" ≠ "Kuchenform", Namensschlüssel vorberechnet.
 
 ## Paket "Schutz" (2026-11-21, Branch `schutz-besucher`, noch nicht gemergt/gepusht)
 
