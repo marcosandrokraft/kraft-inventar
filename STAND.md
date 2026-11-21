@@ -1,6 +1,6 @@
 # Aktueller Stand
 
-Letzter Stand: 2026-11-07, Paket "Übung & Icons" (Branch `features-uebung`, noch nicht gemergt). Diese Datei fasst den Fortschritt zusammen, damit man (auch mit einer
+Letzter Stand: 2026-11-21, Paket "Schutz" (Branch `schutz-besucher`, noch nicht gemergt/gepusht). Diese Datei fasst den Fortschritt zusammen, damit man (auch mit einer
 neuen Claude-Session auf einem anderen Gerät) nahtlos weitermachen kann.
 
 **Die App läuft:** https://marcosandrokraft.github.io/kraft-inventar/ – mit Anmeldung per E-Mail-Link,
@@ -22,6 +22,103 @@ Zugriff nur für freigeschaltete Personen.
   auf das Objekt, grössere Vorschaubilder, Grossansicht mit "Foto ändern". Freistellung lokal in
   Chrome getestet (vorher war sie wegen falscher Bibliothek-URL nie gelaufen). Erstes Foto pro Gerät
   lädt ca. 56 MB KI-Modell → im WLAN machen.
+
+## Paket "Schutz" (2026-11-21, Branch `schutz-besucher`, noch nicht gemergt/gepusht)
+
+Frage: Was können **nicht angemeldete Besucher** der öffentlichen Seite anrichten (Übungsmodus,
+Anmeldeseite, Links) – und wie schützen wir uns? Kurzfassung: An die echten Daten kommt niemand
+(Regeln, im Emulator mit 19 neuen Besucher-Tests geprüft). Die echte Schwachstelle ist das
+**Tageslimit für Anmelde-Mails im Spark-Tarif: 5 pro Projekt und Tag** – wer will, kann es mit 5
+beliebigen Adressen aufbrauchen; dann kann sich an dem Tag niemand **neu** anmelden (schon
+angemeldete Geräte bleiben angemeldet). Das kann nur App Check (Schritt 4 unten) wirklich verhindern.
+
+**Umgesetzt (in der App, wirkt gegen Missbrauch über die Seite selbst):**
+
+- **Anmeldeseite:** pro Gerät höchstens 1 Link pro 60 s, 3 pro Stunde, 5 pro 24 h
+  (`LOGIN_MAIL_LIMITS` in [lib.js](lib.js)); Formatprüfung der Adresse; unsichtbares Fallen-Feld für
+  Formular-Bots (füllt es jemand aus, kommt die normale Meldung, aber es geht keine Mail raus);
+  neutrale Meldung ("Link an … unterwegs" – verrät nicht, ob die Adresse freigeschaltet ist);
+  verständliche Meldung beim Tageslimit ("auth/quota-exceeded"). Der Link in der Mail führt nur noch
+  mit `?c=`/`&n=` zurück, alle anderen Parameter fallen weg (niemand kann Text in fremde Anmelde-Mails
+  schmuggeln). **Ehrlich:** Ein Skript ruft Firebase direkt auf und umgeht all das.
+- **Übungsmodus:** Grenzen pro Gerät – 60 Behälter, 400 Artikel, 20 Fotos, ca. 2 Mio. Zeichen
+  (`PRACTICE_LIMITS` in [uebung-firebase.js](uebung-firebase.js)); darüber freundliche Meldung mit Knopf
+  "Übung zurücksetzen", nichts geht kaputt, Löschen/Ändern geht weiter. Fotos in der Übung ohne
+  Freistellung und klein (max. 320 px, ≤ 60 KB) – kein 56-MB-Download von fremden Servern beim
+  Ausprobieren. Die Vorab-Verbindung (preconnect) zu Firestore wird nur noch mit echten Daten aufgebaut.
+- **Einbetten (Clickjacking):** [frame-guard.js](frame-guard.js) blendet die App aus, wenn eine andere
+  Seite sie in einen Rahmen lädt (frame-ancestors geht auf GitHub Pages nicht – keine eigenen Header).
+- **Überlange Links:** `?c=` über 200 Zeichen → "Ungültiger Behälter-Link"; QR-Druckbogen höchstens 500 Behälter.
+- `firestore.rules` **unverändert** (keine Lücke gefunden). Service Worker **v15**.
+
+**Was du in der Konsole tun solltest (in dieser Reihenfolge, alles kostenlos):**
+
+1. **Spark prüfen** (falls noch nicht, siehe "Offen" Punkt 2): ohne Zahlungsmittel kostet ein Angriff
+   nie Geld, er kann höchstens Tageslimits aufbrauchen. *Nutzen: hoch, Aufwand: 1 Min.*
+2. **Schutz vor Adress-Ausspähung prüfen:** Firebase-Konsole → Authentication → Einstellungen →
+   Nutzeraktionen (User actions) → "Email enumeration protection" muss angehakt sein (bei Projekten
+   ab 15.09.2023 Standard) → Speichern. *Nutzen: gering* – der Anmelde-Link verrät ohnehin nichts,
+   aber andere Auth-Schnittstellen sonst schon.
+3. **API-Key einschränken:** https://console.cloud.google.com/apis/credentials (Projekt kraft-inventar)
+   → "Browser key (auto created by Firebase)" →
+   - Anwendungseinschränkungen: "Websites" → `https://marcosandrokraft.github.io/*` und
+     `https://kraft-inventar.firebaseapp.com/*` (für die Anmelde-Seite von Firebase; zum lokalen
+     Testen zusätzlich `http://localhost:*/*`).
+   - API-Einschränkungen: "Schlüssel einschränken" → Identity Toolkit API, Token Service API,
+     Cloud Firestore API, Firebase App Check API.
+   - Speichern, 5 Min. warten, App auf dem Handy neu laden und **Anmelden testen** (neuer Link). Kommt
+     "requests-from-referer-…-are-blocked", fehlt eine Adresse in der Liste.
+   *Nutzen: mittel* – blockiert fremde Webseiten und Missbrauch des Schlüssels für andere Google-APIs;
+   ein Skript kann den Referer aber fälschen, gegen gezielte Angriffe hilft das allein nicht.
+4. **App Check einrichten – erst überwachen, dann erzwingen:**
+   1. **Zuerst die CSP erweitern** (sonst blockiert die App reCAPTCHA und Anfragen hängen): in
+      [index.html](index.html) in der `Content-Security-Policy`-Zeile bei `script-src` ergänzen:
+      `https://www.google.com https://www.gstatic.com`. Mehr braucht es nicht (geprüft mit
+      `npm run test:e2e:appcheck`: ohne Ergänzung blockiert, mit Ergänzung keine Verletzung).
+   2. https://www.google.com/recaptcha/admin/create → "reCAPTCHA v3" (Google empfiehlt für neue
+      Projekte inzwischen reCAPTCHA Enterprise; v3 wird weiter unterstützt und ist hier vorbereitet),
+      Domains `marcosandrokraft.github.io` und `localhost` → Websiteschlüssel und geheimen Schlüssel kopieren.
+   3. Firebase-Konsole → App Check → Apps → Web-App → reCAPTCHA → **geheimen** Schlüssel eintragen → Speichern.
+   4. **Websiteschlüssel** (der öffentliche) in [firebase-config.js](firebase-config.js) bei `appCheckSiteKey`
+      eintragen. Commit + Push zusammen mit der CSP-Ergänzung, auf den Handys 1–2× neu laden.
+   5. **Ein paar Tage nur beobachten:** App Check → APIs → Cloud Firestore und Authentication zeigen
+      den Anteil "verifizierter" Anfragen. Noch nichts erzwingen.
+   6. Wenn praktisch alles verifiziert ist: **Cloud Firestore → Erzwingen**. Danach einen Tag testen,
+      dann **Authentication → Erzwingen** (Authentication ist bei App Check noch "Preview"; geschützt
+      werden laut Google u.a. das Anfordern des Anmelde-Links und die Anmeldung damit).
+   7. Lokal testen (localhost) nach dem Erzwingen nur mit Debug-Token (App Check → Apps → Debug-Tokens).
+   *Nutzen: hoch* – Anfragen ohne gültigen reCAPTCHA-Nachweis werden abgewiesen; das ist der einzige
+   wirksame Schutz für das 5-Mails-Tageslimit. Kein absoluter Schutz (Angreifer mit echtem Browser),
+   aber Massen-Skripte fallen weg. Rückweg: "Erzwingen" wieder ausschalten.
+5. **Autorisierte Domains aufräumen** (Authentication → Einstellungen → Autorisierte Domains): nur
+   `marcosandrokraft.github.io`, `kraft-inventar.firebaseapp.com` (und `localhost`, solange du lokal
+   testest). *Nutzen: gering.*
+
+**Gut zu wissen:**
+
+- Verweigerte Anfragen: Nicht angemeldete Besucher scheitern schon an `request.auth != null` – das kostet
+  keine Lese-Kontingente. Angemeldete Nicht-Mitglieder kosten pro Anfrage 1 Lesevorgang (Prüfung in
+  `members`), aber nur mit bestätigter Adresse (also nur über einen echten Anmelde-Link). Laut Google
+  werden die Lesevorgänge der Regeln auch bei abgelehnten Anfragen berechnet.
+- Jede Adresse kann über den Anmelde-Link ein (leeres) Konto anlegen; sieht aber nichts. Konten kannst
+  du unter Authentication → Users löschen.
+- Alle GitHub-Pages-Projekte unter `marcosandrokraft.github.io` teilen sich denselben Browser-Speicher
+  (Anmeldung, Übungsdaten). Dort also nur eigene, vertrauenswürdige Seiten veröffentlichen.
+
+**Tests:** `npm test` 183/183, `npm run test:rules` 99/99, `npm run test:e2e` 26/26 + 12/12,
+`test:e2e:cutout` ok, `test:e2e:ocr` ok, neu `test:e2e:appcheck` ok (siehe [TESTS.md](TESTS.md)).
+Nicht getestet: echte Firebase-Konsole/App Check mit echtem Schlüssel, echte Handys.
+
+**Danach mergen und pushen:** `git checkout main && git merge schutz-besucher && git push`. Regeln müssen
+diesmal nicht neu veröffentlicht werden (unverändert).
+
+Quellen: [Auth-Limits](https://firebase.google.com/docs/auth/limits) (5 Mails/Tag Spark),
+[App Check](https://firebase.google.com/docs/app-check),
+[App Check mit reCAPTCHA v3](https://firebase.google.com/docs/app-check/web/recaptcha-provider),
+[App Check für Authentication](https://cloud.google.com/identity-platform/docs/admin/app-check-integration),
+[Email-Enumeration-Schutz](https://cloud.google.com/identity-platform/docs/admin/email-enumeration-protection),
+[Regeln: Abrechnung](https://firebase.google.com/docs/firestore/security/rules-conditions),
+[Firestore-Preise](https://firebase.google.com/docs/firestore/pricing).
 
 ## Paket "Übung & Icons" (2026-11-07, Branch `features-uebung`, noch nicht gemergt/gepusht)
 
@@ -94,15 +191,8 @@ Die Person öffnet die App und meldet sich mit genau dieser Adresse an. Entferne
 
 ### Optional, zusätzlich (ebenfalls kostenlos)
 
-- **App Check (blockt Skripte, die nicht von der Webseite kommen):**
-  - https://www.google.com/recaptcha/admin/create → Typ "reCAPTCHA v3", Domain
-    `marcosandrokraft.github.io` → Websiteschlüssel und geheimen Schlüssel kopieren.
-  - Firebase-Konsole → Build → App Check → Web-App auswählen → "reCAPTCHA" → geheimen Schlüssel einfügen.
-  - Websiteschlüssel in `firebase-config.js` bei `appCheckSiteKey` eintragen, hochladen, ein paar Tage
-    testen. Wenn unter App Check → APIs → Cloud Firestore fast alles "verifiziert" ist → "Erzwingen".
-- **API-Key einschränken:** https://console.cloud.google.com/apis/credentials (Projekt kraft-inventar)
-  → "Browser key" → Anwendungseinschränkungen: "Websites" → eintragen:
-  `https://marcosandrokraft.github.io/*` und `https://kraft-inventar.firebaseapp.com/*` → Speichern.
+App Check, API-Key-Einschränkung usw.: ersetzt durch die genauere Anleitung im Abschnitt
+**Paket "Schutz" → "Was du in der Konsole tun solltest"** oben (dort auch die nötige CSP-Ergänzung).
 
 ### Ideen / bekannte Kleinigkeiten
 

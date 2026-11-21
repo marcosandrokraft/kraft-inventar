@@ -15,6 +15,9 @@ Fehltreffer wie "Bleistift" ≠ Ei, Datenprüfung der Icons), `tests/unit/uebung
 Beispieldaten gültig, set/merge/update/delete, increment, Batch atomar, Abfragen, Listener, Persistenz,
 voller Speicher), `tests/unit/tutorial.test.mjs` (Schritte, Zustand, Bedingungen),
 `tests/unit/uebung-links.test.mjs` (Übungs-QR-Links, Scan echter/Übungs-Codes).
+Paket Schutz: `tests/unit/schutz.test.mjs` (Anmelde-Mails pro Gerät: 60 s Abstand, 3/Stunde, 5/Tag;
+Formatprüfung der Adresse; Rücksprung-Adresse nur mit `c`/`n`; QR-Bogen höchstens 500 Behälter;
+Übungs-Grenzen 60 Behälter / 400 Artikel / 20 Fotos / 2 Mio. Zeichen, alles-oder-nichts, Stand über der Grenze bleibt änderbar).
 Braucht nur Node.js (getestet mit v16.16.0), kein Java, kein Netz:
 
 ```sh
@@ -36,6 +39,11 @@ alle Mitglieder erlaubt. Mitglieder dürfen ihr eigenes members-Dokument lesen (
 und die Liste nicht; members bleibt für alle unschreibbar. Ein Batch-Test mit 8 verschobenen Artikeln
 (16 Schreibvorgänge) zeigt, dass wiederholte `get()`/`exists()` auf dasselbe Dokument nur einmal gegen
 das Limit von 20 pro Batch zählen (nur im Emulator geprüft).
+
+`tests/rules/besucher.test.mjs` (Paket Schutz): sechs Arten von Besuchern – nicht angemeldet, Konto mit
+unbestätigter Adresse, bestätigt aber nicht in members, anonym, fremdes Konto mit Mitglieds- bzw. Owner-Adresse
+ohne Bestätigung – lesen nichts (Behälter, Artikel, Listen, Collection-Group, members, settings/lock, unbekannte
+Sammlungen) und schreiben nichts (auch keine Freischaltung, keine Sperre, keine eigenen Sammlungen).
 
 ### Voraussetzungen
 
@@ -110,6 +118,11 @@ Code im Übungsmodus → nur Hinweis; F5–F6 Sperre als Nicht-Owner (alles ausg
 und als Owner (sperren/entsperren mit Bestätigung, Name statt Adresse); F7–F8 Einführung komplett
 durchgespielt (13 Schritte, 360 px), Hinweis einmalig, Escape; F9 Abmelden löscht Übungsdaten,
 Kopfzeile bei 360 px.
+Paket Schutz: F10 Übungs-Grenzen (Meldung mit "Übung zurücksetzen"), Foto in der Übung klein (≤ 320 px,
+≤ 60 KB) ohne Freistellung und ohne Anfragen an fremde Server, kein preconnect; F11 Anmeldeseite
+(Formatprüfung, Bot-Falle, neutrale Meldung, Rücksprung-Adresse, Abkühlzeit, Stundenlimit nach Neuladen,
+Tageslimit von Firebase mit gefälschtem `auth/quota-exceeded`); F12 eingebettet in fremde Seite → nichts
+bedienbar (index.html und qr.html), überlange `?c=`, QR-Bogen mit 1000 Behältern im Link → 500.
 
 ```sh
 npm run test:e2e
@@ -128,4 +141,13 @@ tesseract.js 7.0.0) unter der CSP aus `index.html` läuft und aus einem gezeichn
 
 ```sh
 npm run test:e2e:ocr
+```
+
+Optional, lädt reCAPTCHA von www.google.com/www.gstatic.com (kein Firebase-Projekt: Projekt `demo-…`,
+ungültiger Platzhalter-Schlüssel, Anfragen an *.googleapis.com blockiert): würde App Check mit dem selbst
+gehosteten Firebase unter der CSP laufen? Prüft die CSP aus `index.html` einmal unverändert (muss reCAPTCHA
+blockieren) und einmal mit `script-src` + `https://www.google.com https://www.gstatic.com` (keine Verletzung):
+
+```sh
+npm run test:e2e:appcheck
 ```
