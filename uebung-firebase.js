@@ -17,6 +17,19 @@ export const SDK_VERSION = "uebung";
 const STORAGE_KEY = "vorrat-uebung-db";
 const FORMAT = 1;
 
+// Grenzen der Übung (pro Gerät). localStorage fasst je nach Browser nur ca. 5 MB pro Website – und
+// den teilt sich die Übung mit den echten Einstellungen (Anmelde-Adresse, "Zuletzt" usw.). Deshalb
+// höchstens ~2 Mio. Zeichen für die Übungsdaten, damit für den Rest sicher genug Platz bleibt.
+// Wird eine Grenze überschritten, lehnt die Übung das Schreiben ab ("resource-exhausted"), nichts
+// geht kaputt; Löschen und Ändern bleiben möglich. Der echte Firestore-Speicher (IndexedDB) ist
+// davon getrennt und wird nie berührt.
+export const PRACTICE_LIMITS = Object.freeze({
+  maxContainers: 60,
+  maxItems: 400,
+  maxPhotos: 20,
+  maxChars: 2_000_000,
+});
+
 // ---- Fehler ----
 
 class FirestoreError extends Error {
@@ -127,9 +140,12 @@ function isQuotaError(err) {
     || err.code === 22 || err.code === 1014);
 }
 
+function serialize(next) {
+  return JSON.stringify({ v: FORMAT, docs: next });
+}
+
 // Speichert `next`. Wirft nur bei vollem Speicher; ohne localStorage bleibt es im Speicher.
-function writeStore(next) {
-  const raw = JSON.stringify({ v: FORMAT, docs: next });
+function writeStore(next, raw = serialize(next)) {
   const s = storage();
   if (!s) return;
   try {
@@ -181,9 +197,9 @@ function loadStore() {
 function ensureLoaded() {
   if (!docs) docs = loadStore();
   if (!storageListening) {
-    storageListening = true;
     try {
       if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+        storageListening = true; // erst wenn wirklich angemeldet (ohne window später nachholen)
         // Änderung in einem anderen Tab → neu laden und Listener benachrichtigen.
         window.addEventListener("storage", (e) => {
           if (e && e.key !== STORAGE_KEY && e.key !== null) return;
@@ -842,18 +858,68 @@ function applyOp(next, op, now) {
   }
 }
 
-// Alles oder nichts: erst auf einer Kopie anwenden, dann speichern, dann übernehmen.
+// Anzahl Behälter, Artikel und Fotos in einem Stand.
+function usage(store) {
+  let containers = 0;
+  let items = 0;
+  let photos = 0;
+  for (const [path, data] of Object.entries(store)) {
+    const s = path.split("/");
+    if (s.length === 2 && s[0] === "containers") containers++;
+    else if (s.length === 4 && s[0] === "containers" && s[2] === "items") {
+      items++;
+      if (typeof data.photo === "string" && data.photo) photos++;
+    }
+  }
+  return { containers, items, photos };
+}
+
+// Belegung der Übung (für Anzeige und Tests): { containers, items, photos, chars }.
+export function practiceUsage() {
+  const store = ensureLoaded();
+  return { ...usage(store), chars: (lastRaw && lastRaw.length) || serialize(store).length };
+}
+
+function limitError(message) {
+  return fail("resource-exhausted", `${message} – etwas löschen oder die Übung zurücksetzen.`);
+}
+
+// Wirft, wenn `next` eine Grenze überschreitet UND gegenüber jetzt wächst (ein Stand über der
+// Grenze bleibt so änderbar/verkleinerbar). → serialisierter Stand.
+function checkLimits(next) {
+  const before = usage(docs);
+  const after = usage(next);
+  const L = PRACTICE_LIMITS;
+  if (after.containers > L.maxContainers && after.containers > before.containers) {
+    throw limitError(`In der Übung höchstens ${L.maxContainers} Behälter`);
+  }
+  if (after.items > L.maxItems && after.items > before.items) {
+    throw limitError(`In der Übung höchstens ${L.maxItems} Artikel`);
+  }
+  if (after.photos > L.maxPhotos && after.photos > before.photos) {
+    throw limitError(`In der Übung höchstens ${L.maxPhotos} Fotos`);
+  }
+  const raw = serialize(next);
+  const beforeChars = (lastRaw && lastRaw.length) || serialize(docs).length;
+  if (raw.length > L.maxChars && raw.length > beforeChars) {
+    throw limitError("Übungsspeicher voll");
+  }
+  return raw;
+}
+
+// Alles oder nichts: erst auf einer Kopie anwenden, Grenzen prüfen, dann speichern, dann übernehmen.
 function commitOps(ops) {
   ensureLoaded();
   refreshFromStorage();
   const now = Date.now();
   const next = { ...docs };
   for (const op of ops) applyOp(next, op, now);
+  const raw = checkLimits(next);
   try {
-    writeStore(next);
+    writeStore(next, raw);
   } catch (err) {
-    // Speicher voll → nichts übernehmen (docs bleibt unverändert).
-    const e = fail("resource-exhausted", "Übungsspeicher voll – Übung zurücksetzen");
+    // Speicher des Browsers voll → nichts übernehmen (docs bleibt unverändert).
+    const e = limitError("Übungsspeicher voll");
     e.cause = err;
     throw e;
   }

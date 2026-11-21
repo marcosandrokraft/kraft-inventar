@@ -10,7 +10,10 @@
   sie mit EvalError fehl, getestet mit tests/e2e/csp-cutout.mjs und csp-ocr.mjs). Eingeschleuste
   Inline-Skripte und onerror=-Handler bleiben blockiert.
   App Check (firebase-config.js → appCheckSiteKey) braucht zusätzlich in script-src
-  "https://www.google.com https://www.gstatic.com" – siehe STAND.md.
+  "https://www.google.com https://www.gstatic.com" – ZUERST hier ergänzen, erst danach den Schlüssel
+  eintragen (siehe STAND.md). Mehr braucht es nicht: connect-src (*.googleapis.com, www.google.com)
+  und frame-src (www.google.com) erlauben reCAPTCHA schon. Geprüft mit npm run test:e2e:appcheck.
+  frame-ancestors (Schutz vor Einbetten) wirkt in einem meta-Tag nicht – dafür frame-guard.js.
   Falls nach einem Update etwas nicht mehr geht: Browser-Konsole zeigt "Refused to …" mit der
   blockierten Adresse.
 -->
@@ -22,7 +25,6 @@
 <link rel="manifest" href="manifest.json" />
 <link rel="icon" href="icon.svg" />
 <link rel="apple-touch-icon" href="icon.svg" />
-<link rel="preconnect" href="https://firestore.googleapis.com" crossorigin />
 <link rel="modulepreload" href="vendor/firebase-10.14.1/firebase-app.js" />
 <link rel="modulepreload" href="vendor/firebase-10.14.1/firebase-firestore.js" />
 <link rel="modulepreload" href="vendor/firebase-10.14.1/firebase-auth.js" />
@@ -30,6 +32,7 @@
 <meta name="apple-mobile-web-app-title" content="Vorrat" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <link rel="preload" href="vendor/fonts/manrope/manrope-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+<script src="frame-guard.js"></script>
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>

@@ -125,6 +125,7 @@ export function qrPageQuery(containers, selected = []) {
 // Gegenstück zu qrPageQuery: → { entries: [{ id, name, where }], selected: Set | null }.
 // `selected` ist null, wenn kein sel= dabei ist (= alle angehakt). IDs mit "/" oder leere IDs
 // fallen weg (wären keine gültigen Behälter-Links), doppelte IDs werden zusammengefasst.
+// Höchstens MAX_QR_ENTRIES Behälter, IDs bis MAX_LINK_ID Zeichen (Schutz vor Riesen-Links).
 export function parseQrPage(search) {
   const params = new URLSearchParams(search);
   const ids = params.getAll("c");
@@ -134,7 +135,8 @@ export function parseQrPage(search) {
   const entries = [];
   ids.forEach((raw, i) => {
     const id = raw.trim();
-    if (!id || id.includes("/") || id.length > 200 || seen.has(id)) return;
+    if (entries.length >= MAX_QR_ENTRIES) return; // sehr lange Links: Rest ignorieren
+    if (!id || id.includes("/") || id.length > MAX_LINK_ID || seen.has(id)) return;
     seen.add(id);
     const name = (names[i] || "").trim().slice(0, MAX_NAME) || id;
     const where = (wheres[i] || "").trim().slice(0, 500);
@@ -549,4 +551,97 @@ export function moveTargetFromScan(text, appHref, fromId, containers) {
     return { error: "unknown", id, name: name || id };
   }
   return { id };
+}
+
+// --- Schutz vor Missbrauch durch Besucher (Paket "Schutz") ---
+
+// Längste ID aus einem Link (?c=, qr.html). Längere gelten als ungültig – schützt vor sehr langen
+// Adressen, die sonst Titel, Suche und QR-Erzeugung im eigenen Browser lahmlegen.
+export const MAX_LINK_ID = 200;
+// Höchstens so viele Behälter auf dem QR-Druckbogen (qr.html) – Rest wird ignoriert.
+export const MAX_QR_ENTRIES = 500;
+
+// Anmelde-Mails pro Gerät (localStorage). Wirkt nur gegen versehentliches Mehrfach-Senden und
+// einfachen Missbrauch über die Seite – ein Skript ruft Firebase direkt auf und umgeht das.
+// Den echten Schutz liefern nur App Check und die Einstellungen in der Firebase-Konsole (STAND.md).
+// Spark-Tarif: Firebase verschickt pro Projekt nur 5 Anmelde-Mails pro Tag.
+export const LOGIN_MAIL_LIMITS = Object.freeze({
+  cooldownMs: 60_000, // Abstand zwischen zwei Mails
+  perHour: 3, // höchstens 3 Mails pro Stunde
+  perDay: 5, // höchstens 5 Mails in 24 Stunden
+});
+const HOUR = 3_600_000;
+const DAY = 24 * HOUR;
+
+// Gespeicherten Verlauf (JSON-Liste von Zeitpunkten in ms) robust lesen.
+export function parseLoginHistory(raw) {
+  try {
+    const list = JSON.parse(raw ?? "[]");
+    if (!Array.isArray(list)) return [];
+    return list.filter((t) => Number.isFinite(t) && t > 0).slice(-50);
+  } catch {
+    return [];
+  }
+}
+
+// Darf jetzt eine Mail verschickt werden? → { ok: true } | { ok: false, reason, waitMs }
+// reason: "cooldown" | "hour" | "day". Zeitpunkte in der Zukunft (Uhr verstellt) zählen als jetzt.
+export function loginMailCheck(history, now, limits = LOGIN_MAIL_LIMITS) {
+  const times = history.map((t) => Math.min(t, now)).filter((t) => now - t < DAY).sort((a, b) => a - b);
+  const last = times[times.length - 1];
+  if (last !== undefined && now - last < limits.cooldownMs) {
+    return { ok: false, reason: "cooldown", waitMs: limits.cooldownMs - (now - last) };
+  }
+  const lastHour = times.filter((t) => now - t < HOUR);
+  if (lastHour.length >= limits.perHour) {
+    return { ok: false, reason: "hour", waitMs: HOUR - (now - lastHour[lastHour.length - limits.perHour]) };
+  }
+  if (times.length >= limits.perDay) {
+    return { ok: false, reason: "day", waitMs: DAY - (now - times[times.length - limits.perDay]) };
+  }
+  return { ok: true };
+}
+
+// Verlauf nach einer verschickten Mail (nur die letzten 24 Stunden behalten).
+export function recordLoginMail(history, now) {
+  return [...history.filter((t) => t <= now && now - t < DAY), now];
+}
+
+// "in 45 Sekunden", "in 12 Minuten", "in 3 Stunden" (aufgerundet).
+export function waitText(ms) {
+  const s = Math.max(1, Math.ceil(ms / 1000));
+  if (s <= 60) return `in ${s} Sekunde${s === 1 ? "" : "n"}`;
+  const m = Math.ceil(s / 60);
+  if (m < 60) return `in ${m} Minute${m === 1 ? "" : "n"}`;
+  const h = Math.ceil(m / 60);
+  return `in ${h} Stunde${h === 1 ? "" : "n"}`;
+}
+
+// Grobe Formatprüfung (der Browser prüft type="email" ebenfalls; Firebase prüft endgültig).
+// Lehnt Leerzeichen, fehlende Domain-Endung, mehrere @ und überlange Adressen ab.
+export function isPlausibleEmail(text) {
+  if (typeof text !== "string" || text.length < 6 || text.length > 254) return false;
+  const at = text.indexOf("@");
+  if (at < 1 || at !== text.lastIndexOf("@") || at > 64) return false;
+  return /^[^\s@<>()[\]\,;:"]+@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/i.test(text)
+    && !text.slice(at + 1).split(".").some((label) => !label || label.startsWith("-") || label.endsWith("-"));
+}
+
+// Adresse, zu der der Link in der Anmelde-Mail zurückführt: diese Seite, aber nur mit ?c= (ohne "/",
+// höchstens MAX_LINK_ID Zeichen) und &n= (gekürzt) – keine anderen Parameter. So kann niemand über die Adresszeile beliebigen
+// Text oder fremde Parameter in Anmelde-Mails an andere einschleusen.
+export function signInContinueUrl(href) {
+  const url = new URL(href);
+  const c = url.searchParams.get("c");
+  const n = (url.searchParams.get("n") || "").trim().slice(0, MAX_NAME);
+  const keep = new URLSearchParams();
+  // c: auch ältere IDs (nicht im App-Format) behalten, damit alte QR-Codes nach der Anmeldung
+  // weiter zum Behälter führen; n nur zusammen mit einer gültigen ID (nur dann legt die App an).
+  if (c && !c.includes("/") && c.length <= MAX_LINK_ID) {
+    keep.set("c", c);
+    if (n && isValidId(c)) keep.set("n", n);
+  }
+  url.search = keep.toString();
+  url.hash = "";
+  return url.href;
 }

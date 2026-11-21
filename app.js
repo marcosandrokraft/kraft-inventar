@@ -39,6 +39,13 @@ import {
   practiceParam,
   scanTarget,
   practiceLinkAction,
+  MAX_LINK_ID,
+  loginMailCheck,
+  recordLoginMail,
+  parseLoginHistory,
+  waitText,
+  isPlausibleEmail,
+  signInContinueUrl,
 } from "./lib.js";
 import { ITEM_ICONS } from "./item-icons.js";
 import { suggestIcon, isKnownIcon, iconForItem, iconToStore, searchIcons, FALLBACK_ICON } from "./icon-match.js";
@@ -61,6 +68,16 @@ function detectPractice() {
   }
 }
 const PRACTICE = detectPractice();
+
+// Verbindung zu Firestore vorab aufbauen – nur mit echten Daten. Stand früher fest in index.html;
+// dann baute auch der Übungsmodus eine (leere) Verbindung zu Google auf.
+if (!PRACTICE) {
+  const link = document.createElement("link");
+  link.rel = "preconnect";
+  link.href = "https://firestore.googleapis.com";
+  link.crossOrigin = "";
+  document.head.appendChild(link);
+}
 
 // Firebase bzw. die Übungs-Datenschicht (gleiche Funktionen) laden.
 const [appMod, firestoreMod, authMod] = PRACTICE
@@ -258,10 +275,14 @@ function background(promise, what = "Speichern") {
       toast(`${LOCKED_TEXT} – nichts geändert.`, 4000);
       return;
     }
+    // Übung: Grenze erreicht bzw. Speicher voll → verständliche Meldung mit "Zurücksetzen".
+    if (PRACTICE && err.code === "resource-exhausted") {
+      console.warn(err.message);
+      toast(`${what} nicht möglich. ${err.message}`, { ms: 8000, action: { label: "Übung zurücksetzen", fn: resetPractice } });
+      return;
+    }
     console.error(err);
-    // Übungsspeicher voll: verständliche Meldung der Übungs-Datenschicht zeigen.
-    const reason = err.code === "resource-exhausted" ? err.message : (err.code || err.message);
-    toast(`${what} fehlgeschlagen (${reason})`, 4000);
+    toast(`${what} fehlgeschlagen (${err.code || err.message})`, 4000);
   });
 }
 
@@ -293,12 +314,18 @@ function scaledCanvas(img, maxDim) {
   return canvas;
 }
 
+// Fotos im Übungsmodus: kleiner (passen so ~20 in den Übungsspeicher) und ohne Freistellung – die
+// lädt beim ersten Mal ca. 56 MB von fremden Servern (cdn.jsdelivr.net, staticimgly.com), das soll
+// beim blossen Ausprobieren nicht passieren. Anzahl begrenzt PRACTICE_LIMITS in uebung-firebase.js.
+const PRACTICE_PHOTO = { maxDim: 320, maxLength: 60_000 };
+const REAL_PHOTO = { maxDim: 480, maxLength: 300_000 };
+
 // Speichert so klein, dass es sicher in ein Firestore-Dokument (max. 1 MB) passt.
-function toJpegDataUrl(img) {
-  let maxDim = 480;
+function toJpegDataUrl(img, { maxDim: startDim, maxLength } = PRACTICE ? PRACTICE_PHOTO : REAL_PHOTO) {
+  let maxDim = startDim;
   let quality = 0.75;
   let result = scaledCanvas(img, maxDim).toDataURL("image/jpeg", quality);
-  while (result.length > 300_000 && maxDim > 160) {
+  while (result.length > maxLength && maxDim > 160) {
     maxDim = Math.round(maxDim * 0.7);
     quality = Math.max(0.5, quality - 0.1);
     result = scaledCanvas(img, maxDim).toDataURL("image/jpeg", quality);
@@ -360,6 +387,7 @@ async function cutoutWithBackground(img) {
 // Liefert das fertige Foto als JPEG-dataURL: freigestellt, sonst (Fehler/kein Objekt) das normale Foto.
 async function processPhoto(file) {
   const img = await loadBlobImage(file);
+  if (PRACTICE) return toJpegDataUrl(img); // keine Freistellung (siehe PRACTICE_PHOTO)
   try {
     toast("Hintergrund wird entfernt… (beim ersten Mal kann es bis zu einer Minute dauern)", 5000);
     const result = toJpegDataUrl(await cutoutWithBackground(img));
@@ -1273,10 +1301,12 @@ function renderLogin() {
     <p class="muted">Gib deine E-Mail-Adresse ein. Du bekommst einen Link, mit dem du dich ohne Passwort
       anmeldest. Danach bleibst du auf diesem Gerät angemeldet.</p>
     <form class="add-form" id="login-form">
-      <input name="email" type="email" autocomplete="email" placeholder="E-Mail-Adresse" required />
+      <input name="email" type="email" autocomplete="email" placeholder="E-Mail-Adresse" maxlength="254" required />
+      <!-- Falle für Formular-Bots: für Menschen unsichtbar, wird nie ausgefüllt -->
+      <div class="hp-field" aria-hidden="true"><label>Webseite <input name="website" type="text" tabindex="-1" autocomplete="off" /></label></div>
       <button type="submit">Link senden</button>
     </form>
-    <p class="muted" id="login-status">${loginError ? escapeHtml(loginError) : ""}</p>
+    <p class="muted" id="login-status" role="status">${loginError ? escapeHtml(loginError) : ""}</p>
     <div class="try-practice">
       <p class="muted">Noch nicht freigeschaltet oder erst einmal ausprobieren? Im Übungsmodus übst du mit
         Beispieldaten – nur auf diesem Gerät, ohne Anmeldung.</p>
@@ -1285,21 +1315,85 @@ function renderLogin() {
   `;
   loadTutorial().then((m) => m.showFirstRunHint(tutorialCtx("login"))).catch(() => {});
   const status = document.getElementById("login-status");
-  document.getElementById("login-form").addEventListener("submit", async (e) => {
+  const form = document.getElementById("login-form");
+  const button = form.querySelector('button[type="submit"]');
+  let sending = false;
+  form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const email = e.target.email.value.trim();
+    if (sending) return;
+    const email = form.email.value.trim();
     if (!email) return;
+    if (!isPlausibleEmail(email)) {
+      status.textContent = "Bitte eine gültige E-Mail-Adresse eingeben.";
+      return;
+    }
+    // Gleiche Meldung wie bei Erfolg, damit ein Bot nichts merkt – es wird aber nichts verschickt.
+    if (form.website.value) {
+      status.textContent = sentText(email);
+      return;
+    }
+    const check = loginMailCheck(loginMailHistory(), Date.now());
+    if (!check.ok) {
+      status.textContent = check.reason === "cooldown"
+        ? `Bitte warten: Ein neuer Link geht ${waitText(check.waitMs)}. Der letzte ist evtl. schon unterwegs (auch im Junk-/Spam-Ordner nachschauen).`
+        : `Von diesem Gerät wurden gerade viele Links angefordert. Nächster Versuch ${waitText(check.waitMs)} – oder ohne Anmeldung üben.`;
+      return;
+    }
+    sending = true;
+    button.disabled = true;
     status.textContent = "Sende Link…";
     try {
-      // Nach dem Klick auf den Link landet man wieder genau hier (inkl. ?c= vom QR-Code).
-      await sendSignInLinkToEmail(auth, email, { url: location.href, handleCodeInApp: true });
+      // Nach dem Klick auf den Link landet man wieder hier (nur ?c=/&n= vom QR-Code bleiben).
+      await sendSignInLinkToEmail(auth, email, { url: signInContinueUrl(location.href), handleCodeInApp: true });
+      saveLoginMailHistory(recordLoginMail(loginMailHistory(), Date.now()));
       storageSet(EMAIL_KEY, email);
-      status.textContent = `Link an ${email} gesendet. Bitte Mail öffnen (auch im Junk-/Spam-Ordner nachschauen).`;
+      status.textContent = sentText(email);
     } catch (err) {
-      console.error(err);
-      status.textContent = `Senden fehlgeschlagen (${err.code || err.message})`;
+      console.warn("Anmelde-Link nicht gesendet:", err); // erwartbar (Tageslimit, Netz) – Meldung steht auf der Seite
+      status.textContent = loginErrorText(err);
+    } finally {
+      sending = false;
+      button.disabled = false;
     }
   });
+}
+
+// Neutral: sagt nichts darüber, ob die Adresse freigeschaltet ist (Firebase schickt den Link an jede
+// Adresse; erst nach der Anmeldung entscheiden die Regeln, ob man Daten sieht).
+function sentText(email) {
+  return `Link an ${email} unterwegs. Bitte Mail öffnen (auch im Junk-/Spam-Ordner nachschauen).`;
+}
+
+// Verständliche Meldungen statt Fehlercodes; verrät nichts über andere Adressen.
+function loginErrorText(err) {
+  switch (err && err.code) {
+    case "auth/quota-exceeded":
+      return "Heute können keine Anmelde-Links mehr verschickt werden (Tageslimit). Bitte morgen erneut versuchen – bis dahin geht Üben ohne Anmeldung.";
+    case "auth/too-many-requests":
+      return "Zu viele Versuche. Bitte später erneut versuchen.";
+    case "auth/invalid-email":
+    case "auth/missing-email":
+      return "Bitte eine gültige E-Mail-Adresse eingeben.";
+    case "auth/network-request-failed":
+      return "Keine Verbindung. Bitte später erneut versuchen.";
+    case "auth/firebase-app-check-token-is-invalid":
+      return "Anfrage abgelehnt (Schutzprüfung). Seite neu laden und nochmals versuchen.";
+    default:
+      return `Senden fehlgeschlagen (${(err && (err.code || err.message)) || "unbekannt"})`;
+  }
+}
+
+// Verlauf der angeforderten Anmelde-Mails dieses Geräts (localStorage; ohne localStorage nur im
+// Speicher dieser Seite). Siehe LOGIN_MAIL_LIMITS in lib.js.
+const LOGIN_MAILS_KEY = "loginMails";
+let loginMailsMemory = [];
+function loginMailHistory() {
+  const stored = parseLoginHistory(storageGet(LOGIN_MAILS_KEY));
+  return [...new Set([...stored, ...loginMailsMemory])];
+}
+function saveLoginMailHistory(list) {
+  loginMailsMemory = list;
+  storageSet(LOGIN_MAILS_KEY, JSON.stringify(list));
 }
 
 function showLogout(user) {
@@ -1999,7 +2093,8 @@ function renderRealCodeHint(id) {
 // → false, wenn statt des Behälters ein Hinweis gezeigt wird.
 function renderContainer(id) {
   // Ein "/" in ?c= würde einen ungültigen Firestore-Pfad ergeben (Seite bliebe bei "Lade…").
-  if (!id || id.includes("/")) {
+  // Überlange IDs (manipulierter Link) gar nicht erst anfragen.
+  if (!id || id.includes("/") || id.length > MAX_LINK_ID) {
     main.innerHTML = `<p class="empty-hint">Ungültiger Behälter-Link.<br><a href="index.html">Zur Übersicht</a></p>`;
     return false;
   }

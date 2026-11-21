@@ -1122,3 +1122,13 @@ body.read-only #items .qty-controls { box-shadow: none; }
 .try-practice { margin-top: 2rem; padding-top: 1.25rem; border-top: 1px solid var(--hairline); }
 .try-practice .button-link { gap: 0.5rem; width: 100%; }
 .button-link .icon { color: var(--accent); }
+
+/* --- Schutz (Paket "Schutz") --- */
+/* Falle für Formular-Bots auf der Anmeldeseite: ausserhalb des Bildschirms, für Menschen unsichtbar. */
+.hp-field { position: absolute; left: -10000px; top: auto; width: 1px; height: 1px; overflow: hidden; }
+/* In fremde Seiten eingebettet (Clickjacking, frame-guard.js): App ausblenden, nur ein Hinweis. */
+html.framed body > * { display: none !important; }
+html.framed body::before {
+  content: "Vorrat kann nur direkt geöffnet werden, nicht eingebettet in eine andere Seite.";
+  display: block; max-width: 32rem; margin: 3rem auto; padding: 0 1rem; color: var(--text); font-weight: 650;
+}
