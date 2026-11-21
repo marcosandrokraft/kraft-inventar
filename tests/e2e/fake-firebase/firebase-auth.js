@@ -18,6 +18,12 @@ export function isSignInWithEmailLink() { return false; }
 
 export async function sendSignInLinkToEmail(a, email, settings) {
   window.__authCalls.push({ fn: "sendSignInLinkToEmail", email, settings });
+  // window.__fakeSendError = "auth/quota-exceeded" → Fehler wie bei Firebase (Tageslimit usw.).
+  if (window.__fakeSendError) {
+    const err = new Error(`Firebase: Error (${window.__fakeSendError}).`);
+    err.code = window.__fakeSendError;
+    throw err;
+  }
 }
 
 export async function signInWithEmailLink(a, email) {

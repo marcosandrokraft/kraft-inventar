@@ -398,6 +398,172 @@ test("F9 Abmelden löscht auch die Übungsdaten; Kopfzeile passt bei 360 px", as
   await t.done();
 });
 
+// ---- Paket "Schutz": was Besucher ohne Anmeldung anrichten können ----
+
+test("F10 Übung: Grenzen mit freundlicher Meldung und Zurücksetzen; Fotos klein, ohne Freistellung und ohne fremde Server", async () => {
+  // 60 Behälter (= Grenze) schon in der Übung, nur beim ersten Laden setzen.
+  const t = await open("index.html?uebung=1", { signedOut: true, init: () => {
+    try {
+      if (!sessionStorage.getItem("__f10")) {
+        sessionStorage.setItem("__f10", "1");
+        const docs = {};
+        for (let i = 0; i < 60; i++) docs[`containers/voll-${i}`] = { name: `Voll ${i}` };
+        docs["containers/voll-0/items/milch"] = { name: "Milch", qty: 1, unit: "Stk" };
+        localStorage.setItem("vorrat-uebung-db", JSON.stringify({ v: 1, docs }));
+      }
+    } catch {}
+  } });
+  const { page } = t;
+  await page.waitForSelector('#container-list a.card[data-cid="voll-1"]');
+  await page.fill('#new-container-form input[name="name"]', "Einer zu viel");
+  await page.click('#new-container-form button[type="submit"]');
+  await waitUntil(page, () => document.getElementById("toast").textContent.includes("höchstens 60 Behälter"));
+  const toastText = await page.textContent("#toast");
+  assert(toastText.includes("nicht möglich") && toastText.includes("zurücksetzen"), `Meldung: ${toastText}`);
+  assert(!(await t.practiceDb()).docs["containers/einer-zu-viel"], "Nichts angelegt");
+
+  // Foto im Übungsmodus: grosses Bild (1600×1200) über das Formular hinzufügen
+  await page.goto(server.url + "index.html?c=voll-0");
+  await page.waitForSelector('#items .card[data-id="milch"]');
+  await page.evaluate(async () => {
+    const c = document.createElement("canvas");
+    c.width = 1600; c.height = 1200;
+    const ctx = c.getContext("2d");
+    for (let i = 0; i < 400; i++) { ctx.fillStyle = `hsl(${i * 37 % 360},70%,${30 + i % 40}%)`; ctx.fillRect((i * 97) % 1600, (i * 53) % 1200, 120, 90); }
+    const blob = await new Promise((r) => c.toBlob(r, "image/png"));
+    const dt = new DataTransfer();
+    dt.items.add(new File([blob], "foto.png", { type: "image/png" }));
+    const input = document.querySelector('#add-item-form input[name="photo"]');
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await page.fill('#add-item-form input[name="name"]', "Fotoartikel");
+  await page.click('#add-item-form button[type="submit"]');
+  await waitUntil(page, () => {
+    const d = JSON.parse(localStorage.getItem("vorrat-uebung-db") || "{}").docs || {};
+    return !!(d["containers/voll-0/items/fotoartikel"] || {}).photo;
+  }, { timeout: 15000 });
+  const photo = (await t.practiceDb()).docs["containers/voll-0/items/fotoartikel"].photo;
+  assert(photo.startsWith("data:image/jpeg;base64,") && photo.length <= 60_000, `Foto klein (${photo.length} Zeichen)`);
+  const dims = await page.evaluate((src) => new Promise((r) => { const i = new Image(); i.onload = () => r([i.width, i.height]); i.src = src; }), photo);
+  assert(Math.max(...dims) <= 320, `Foto höchstens 320 px: ${dims}`);
+  const foreign = t.net.external.filter((u) => /jsdelivr|staticimgly|googleapis|gstatic|google\.com|firebase/.test(u));
+  assertEqual(foreign, [], "Keine Anfragen an fremde Server im Übungsmodus");
+  assertEqual(await page.evaluate(() => document.querySelectorAll('link[rel="preconnect"]').length), 0, "Kein preconnect zu Google im Übungsmodus");
+
+  // "Übung zurücksetzen" direkt aus der Meldung
+  await page.goto(server.url + "index.html");
+  await page.waitForSelector('#container-list a.card[data-cid="voll-1"]');
+  await page.fill('#new-container-form input[name="name"]', "Noch einer");
+  await page.click('#new-container-form button[type="submit"]');
+  await waitUntil(page, () => !!document.querySelector("#toast.show button"));
+  await Promise.all([page.waitForURL(/index\.html$/), page.click("#toast button")]);
+  await page.waitForSelector('#container-list a.card[data-cid="kueche"]');
+  assert(!(await t.practiceDb()).docs["containers/voll-1"], "Zurückgesetzt auf Beispieldaten");
+  await t.done();
+});
+
+test("F11 Anmeldeseite: Formatprüfung, Falle für Bots, neutrale Meldung, Abkühlzeit, Stundenlimit, Tageslimit von Firebase", async () => {
+  const t = await open("index.html?c=keller&n=Keller&foo=bar&tutorial=1", { signedOut: true });
+  const { page } = t;
+  await page.waitForSelector("#login-form");
+  assert(await page.evaluate(() => document.querySelectorAll('link[rel="preconnect"][href*="firestore"]').length === 1), "preconnect nur mit echten Daten");
+  const calls = () => page.evaluate(() => window.__authCalls.filter((c) => c.fn === "sendSignInLinkToEmail"));
+  const submit = async (email) => {
+    await page.fill('#login-form input[name="email"]', email);
+    await page.click('#login-form button[type="submit"]');
+  };
+  const status = () => page.textContent("#login-status");
+
+  // Falle unsichtbar und ausserhalb der Tab-Reihenfolge
+  const hp = await page.evaluate(() => { const i = document.querySelector('#login-form input[name="website"]'); const r = i.getBoundingClientRect(); return { tab: i.tabIndex, right: r.right, hidden: i.closest("[aria-hidden]") !== null }; });
+  assert(hp.tab === -1 && hp.right <= 0 && hp.hidden, `Falle versteckt: ${JSON.stringify(hp)}`);
+
+  // Ungültige Adresse (Browser lässt "a@b" durch type=email durch)
+  await submit("a@b");
+  await waitUntil(page, () => document.getElementById("login-status").textContent.includes("gültige"));
+  assertEqual((await calls()).length, 0, "Keine Mail bei ungültiger Adresse");
+
+  // Bot füllt die Falle aus → gleiche Meldung, aber keine Mail
+  await page.evaluate(() => { document.querySelector('#login-form input[name="website"]').value = "http://spam.example.com"; });
+  await submit("bot@example.com");
+  await waitUntil(page, () => document.getElementById("login-status").textContent.includes("unterwegs"));
+  assertEqual((await calls()).length, 0, "Keine Mail bei ausgefüllter Falle");
+  await page.evaluate(() => { document.querySelector('#login-form input[name="website"]').value = ""; });
+
+  // Echte Anfrage: neutrale Meldung, Rücksprung nur mit c und n
+  await submit("anna@example.com");
+  await waitUntil(page, () => window.__authCalls.length === 1);
+  const [call] = await calls();
+  assertEqual(call.settings, { url: `${server.url}index.html?c=keller&n=Keller`, handleCodeInApp: true }, "Rücksprung-Adresse ohne fremde Parameter");
+  const sent = await status();
+  assert(sent.includes("unterwegs") && !/freigeschaltet|Mitglied|unbekannt/i.test(sent), `Neutrale Meldung: ${sent}`);
+
+  // Sofort nochmals → Abkühlzeit
+  await submit("anna@example.com");
+  await waitUntil(page, () => document.getElementById("login-status").textContent.includes("Bitte warten"));
+  assert((await status()).includes("Sekunden"), "Restzeit genannt");
+  assertEqual((await calls()).length, 1, "Keine zweite Mail innerhalb von 60 s");
+  assertEqual(await page.evaluate(() => JSON.parse(localStorage.getItem("loginMails")).length), 1, "Verlauf gespeichert");
+
+  // 3 Mails in der letzten Stunde (älter als 60 s) → Stundenlimit, auch nach Neuladen
+  await page.evaluate(() => { const n = Date.now(); localStorage.setItem("loginMails", JSON.stringify([n - 50 * 60000, n - 30 * 60000, n - 2 * 60000])); });
+  await page.reload();
+  await page.waitForSelector("#login-form");
+  await submit("anna@example.com");
+  await waitUntil(page, () => document.getElementById("login-status").textContent.includes("viele Links"));
+  assert((await status()).includes("in 10 Minuten"), `Wartezeit: ${await status()}`);
+  assertEqual((await calls()).length, 0, "Keine Mail über dem Stundenlimit (nach Neuladen)");
+
+  // Tageslimit von Firebase (Spark: 5 Mails pro Projekt und Tag) → verständliche Meldung, nicht gezählt
+  await page.evaluate(() => { localStorage.removeItem("loginMails"); window.__fakeSendError = "auth/quota-exceeded"; });
+  await submit("anna@example.com");
+  await waitUntil(page, () => document.getElementById("login-status").textContent.includes("Tageslimit"));
+  assertEqual(await page.evaluate(() => localStorage.getItem("loginMails")), null, "Fehlversuch zählt nicht");
+  assert(await page.isEnabled('#login-form button[type="submit"]'), "Knopf wieder aktiv");
+  await t.done();
+});
+
+test("F12 Einbetten in fremde Seiten (Clickjacking), überlange Links, QR-Bogen mit Riesen-Link", async () => {
+  const t = await open("index.html", { seed: { "containers/keller": { name: "Keller" } } });
+  const { page } = t;
+  await page.waitForSelector('#container-list a.card[data-cid="keller"]');
+  assertEqual(await page.evaluate(() => document.documentElement.classList.contains("framed")), false, "Direkt geöffnet: normal");
+
+  // Eingebettet in eine fremde Seite: "Angreifer-Seite" ohne CSP, vom Test selbst ausgeliefert (nach
+  // guardNetwork registriert → hat Vorrang). Gleicher Server, weil Chrome Rahmen von einer anderen
+  // Adresse auf 127.0.0.1 blockiert (Local Network Access); frame-guard.js prüft nur window.top.
+  const evil = server.url + "__angreifer.html";
+  let evilTarget = "";
+  await t.context.route(evil, (route) => route.fulfill({
+    status: 200,
+    contentType: "text/html; charset=utf-8",
+    body: `<!doctype html><link rel="icon" href="data:,"><p>Gewinnspiel!</p><iframe id="f" src="${server.url}${evilTarget}" width="800" height="600"></iframe>`,
+  }));
+  for (const target of ["index.html", "qr.html?c=keller"]) {
+    evilTarget = target;
+    await page.goto(evil);
+    const frame = await (await page.waitForSelector("#f")).contentFrame();
+    await frame.waitForLoadState("load");
+    await waitUntil(frame, () => document.documentElement.classList.contains("framed"));
+    const visible = await frame.evaluate(() => [...document.body.children].filter((e) => getComputedStyle(e).display !== "none").length);
+    assertEqual(visible, 0, `${target}: eingebettet ist nichts bedienbar`);
+  }
+
+  // Überlange Behälter-ID → Hinweis statt Anfrage
+  await page.goto(server.url + `index.html?c=${"a".repeat(5000)}`);
+  await page.waitForSelector("main .empty-hint");
+  assert((await page.textContent("main")).includes("Ungültiger Behälter-Link"), "Überlange ID abgelehnt");
+
+  // QR-Druckbogen mit 1000 Behältern im Link → höchstens 500 Codes (Server lehnen viel längere Adressen ohnehin ab)
+  const q = new URLSearchParams();
+  for (let i = 0; i < 1000; i++) q.append("c", `b${i}`);
+  await page.goto(server.url + `qr.html?${q}`);
+  await page.waitForSelector(".qr-card");
+  assertEqual(await page.locator(".qr-card").count(), 500, "QR-Bogen begrenzt");
+  await t.done();
+});
+
 const failed = await run(process.argv[2]);
 await browser.close();
 await server.close();
